@@ -83,6 +83,7 @@ describe('e2e flow', () => {
           total: expect.any(Number),
         },
         precallPermissions: [{ expiry: expect.any(String), id: expect.any(String) }],
+        signer: { keyId: expect.any(String) },
       }, `
         {
           "account": {
@@ -119,10 +120,10 @@ describe('e2e flow', () => {
             },
           ],
           "signer": {
-            "backend": "secure-enclave",
+            "backend": "chipkey",
             "curve": "p256",
             "exists": true,
-            "keyId": "se.agent.wallet.default",
+            "keyId": Any<String>,
           },
           "warnings": [],
         }
@@ -200,6 +201,7 @@ describe('e2e flow', () => {
           latestExpiry: expect.toSatisfy((v) => v === null || typeof v === 'string'),
           total: expect.any(Number),
         },
+        signer: { keyId: expect.any(String) },
       }, `
         {
           "account": {
@@ -230,10 +232,10 @@ describe('e2e flow', () => {
           "poweredBy": "Porto",
           "precallPermissions": [],
           "signer": {
-            "backend": "secure-enclave",
+            "backend": "chipkey",
             "curve": "p256",
             "exists": true,
-            "keyId": "se.agent.wallet.default",
+            "keyId": Any<String>,
           },
           "warnings": [],
         }
@@ -245,7 +247,7 @@ describe('e2e flow', () => {
         "Status
         Account: [dynamic]
         Chain: Base Sepolia (84532)
-        Signer: secure-enclave (ready)
+        Signer: chipkey (ready)
         Activation: active_onchain
         Permissions: 1 active / 1 total
         Latest permission expiry: [dynamic]
@@ -282,7 +284,7 @@ describe('e2e flow', () => {
       expect(config.porto?.address?.toLowerCase()).toBe(account.address.toLowerCase())
       expect(config).toMatchInlineSnapshot({
         porto: { address: expect.any(String) },
-        signer: { handle: expect.any(String) },
+        signer: { keyId: expect.any(String) },
       }, `
         {
           "porto": {
@@ -293,9 +295,8 @@ describe('e2e flow', () => {
             "testnet": true,
           },
           "signer": {
-            "backend": "secure-enclave",
-            "handle": Any<String>,
-            "keyId": "se.agent.wallet.default",
+            "backend": "chipkey",
+            "keyId": Any<String>,
           },
           "version": 1,
         }
@@ -339,7 +340,7 @@ describe('e2e flow', () => {
             key: { publicKey: expect.any(String) },
           }],
         },
-        signer: { handle: expect.any(String) },
+        signer: { keyId: expect.any(String) },
       }, `
         {
           "porto": {
@@ -385,9 +386,8 @@ describe('e2e flow', () => {
             "testnet": true,
           },
           "signer": {
-            "backend": "secure-enclave",
-            "handle": Any<String>,
-            "keyId": "se.agent.wallet.default",
+            "backend": "chipkey",
+            "keyId": Any<String>,
           },
           "version": 1,
         }

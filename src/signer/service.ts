@@ -1,8 +1,10 @@
+import crypto from 'node:crypto'
+
 import { bytesToHex, hexToBytes, normalizeHex, toBase64Url } from '../lib/encoding.js'
 import { AppError } from '../lib/errors.js'
 import type { AgentWalletConfig } from '../lib/config.js'
-import { MacOsSecureEnclaveBackend } from './macos/secureEnclaveBackend.js'
-import type { InitKeyOptions, SignHashMode, SignerBackend } from './types.js'
+import { ChipkeyBackend } from './chipkeyBackend.js'
+import type { InitKeyOptions, SignHashMode } from './types.js'
 
 export type PublicKeyFormat = 'raw' | 'hex' | 'jwk' | 'spki'
 export type PayloadFormat = 'hex' | 'base64' | 'raw'
@@ -13,13 +15,6 @@ const P256_SPKI_PREFIX =
 const KEY_NOT_INITIALIZED_MESSAGE =
   'Signer key has not been initialized. Run `agent-wallet configure` first.'
 
-function getBackend(config: AgentWalletConfig): SignerBackend {
-  if (config.signer.backend === 'secure-enclave') {
-    return new MacOsSecureEnclaveBackend()
-  }
-
-  throw new AppError('UNSUPPORTED_BACKEND', `Unsupported signer backend: ${config.signer.backend}`)
-}
 
 function decodePayload(payload: string, format: PayloadFormat): Uint8Array {
   if (format === 'raw') return Buffer.from(payload, 'utf8')
@@ -72,23 +67,21 @@ function toPortoPublicKey(publicKey: `0x${string}`): `0x${string}` {
 }
 
 export class SignerService {
-  readonly #backend: SignerBackend
+  readonly #backend = new ChipkeyBackend()
 
-  constructor(private readonly config: AgentWalletConfig) {
-    this.#backend = getBackend(config)
-  }
+  constructor(private readonly config: AgentWalletConfig) {}
 
   get keyId() {
     return this.config.signer.keyId
   }
 
-  async init(options: Omit<InitKeyOptions, 'keyId'> = {}) {
-    const existingHandle = this.config.signer.handle
-    if (existingHandle && !options.overwrite) {
-      const info = await this.#backend.info(existingHandle)
+  async init(options: InitKeyOptions = {}) {
+    const keyId = this.config.signer.keyId
+    if (keyId && !options.overwrite) {
+      const info = await this.#backend.info(keyId)
       if (info.exists) {
         return {
-          keyId: this.config.signer.keyId,
+          keyId,
           backend: this.#backend.name,
           curve: 'p256',
           created: false,
@@ -96,13 +89,12 @@ export class SignerService {
       }
     }
 
-    const result = await this.#backend.create({
-      label: options.label,
-    })
-    this.config.signer.handle = result.handle
+    const newKeyId = `agent-wallet:${crypto.randomUUID()}`
+    await this.#backend.create(newKeyId, { label: options.label })
+    this.config.signer.keyId = newKeyId
 
     return {
-      keyId: this.config.signer.keyId,
+      keyId: newKeyId,
       backend: this.#backend.name,
       curve: 'p256',
       created: true,
@@ -110,19 +102,19 @@ export class SignerService {
   }
 
   async info() {
-    const handle = this.config.signer.handle
-    if (!handle) {
+    const keyId = this.config.signer.keyId
+    if (!keyId) {
       return {
-        keyId: this.config.signer.keyId,
+        keyId,
         backend: this.#backend.name,
         curve: 'p256',
         exists: false,
       }
     }
 
-    const result = await this.#backend.info(handle)
+    const result = await this.#backend.info(keyId)
     return {
-      keyId: this.config.signer.keyId,
+      keyId,
       backend: this.#backend.name,
       curve: 'p256',
       exists: result.exists,
@@ -130,42 +122,42 @@ export class SignerService {
   }
 
   async pubkey(format: PublicKeyFormat) {
-    const handle = this.config.signer.handle
-    if (!handle) {
+    const keyId = this.config.signer.keyId
+    if (!keyId) {
       throw new AppError('KEY_NOT_INITIALIZED', KEY_NOT_INITIALIZED_MESSAGE)
     }
 
-    const publicKey = await this.#backend.getPublicKey(handle)
+    const publicKey = await this.#backend.getPublicKey(keyId)
     return {
-      keyId: this.config.signer.keyId,
+      keyId,
       curve: 'p256',
       publicKey: formatPublicKey(publicKey, format),
     }
   }
 
   async sign(payload: string, format: PayloadFormat, hash: SignHashMode) {
-    const handle = this.config.signer.handle
-    if (!handle) {
+    const keyId = this.config.signer.keyId
+    if (!keyId) {
       throw new AppError('KEY_NOT_INITIALIZED', KEY_NOT_INITIALIZED_MESSAGE)
     }
 
     const bytes = decodePayload(payload, format)
-    const signature = await this.#backend.sign(handle, bytes, hash)
+    const signature = await this.#backend.sign(keyId, bytes, hash)
 
     return {
-      keyId: this.config.signer.keyId,
+      keyId,
       alg: 'ES256',
       signature: bytesToHex(signature),
     }
   }
 
   async getPortoKey() {
-    const handle = this.config.signer.handle
-    if (!handle) {
+    const keyId = this.config.signer.keyId
+    if (!keyId) {
       throw new AppError('KEY_NOT_INITIALIZED', KEY_NOT_INITIALIZED_MESSAGE)
     }
 
-    const publicKey = await this.#backend.getPublicKey(handle)
+    const publicKey = await this.#backend.getPublicKey(keyId)
     return {
       prehash: false,
       publicKey: toPortoPublicKey(normalizeHex(publicKey) as `0x${string}`),

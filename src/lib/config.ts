@@ -17,10 +17,9 @@ export type PrecallPermission = {
 export type AgentWalletConfig = {
   version: 1
   signer: {
-    keyId: string
-    backend: 'secure-enclave'
+    keyId?: string
+    backend: 'chipkey'
     label?: string
-    handle?: string
   }
   porto?: {
     address?: `0x${string}`
@@ -34,8 +33,7 @@ export type AgentWalletConfig = {
 const DEFAULT_CONFIG: AgentWalletConfig = {
   version: 1,
   signer: {
-    keyId: 'se.agent.wallet.default',
-    backend: 'secure-enclave',
+    backend: 'chipkey',
   },
   porto: {
     precallPermissions: [],
