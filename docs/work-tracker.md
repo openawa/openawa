@@ -40,18 +40,20 @@ Latest validation on this machine (2026-03-02):
 - **Agent-wallet impact**: Low. `getActivePermissions` already passes `chainIds: [chain.id]` and filters by `role === 'normal'` + public key match, so it won't misuse leaked keys. Worst case: `status` could show a permission as present on a chain where it's only pending via precall.
 
 ## Now
-- Expand colocated unit coverage under `src/**`: add tests for `getChainByIdOrName`, `resolveCommandChain`.
+- Expand colocated unit coverage under `src/**` (ongoing).
+- Decide CI strategy for live passkey e2e (scheduled/manual vs per-PR).
 
 ## Next
 - Move Secure Enclave opaque handle storage from config into keychain item.
 - Introduce account profile model with alias + default selection.
-- Expand colocated unit coverage under `src/**`: add tests for `getChainByIdOrName`, `resolveCommandChain`.
-- Decide CI strategy for live passkey e2e (scheduled/manual vs per-PR).
 
 ## Later
 - Remote-admin setup (out-of-band admin ceremony from separate device).
 - Multi-account aliases and default profile ergonomics.
 - Evaluate additional backend adapters after Porto-first UX stabilizes.
+
+## Done (2026-03-03)
+- Added colocated unit tests for `getChainByIdOrName` and `resolveCommandChain` (`src/porto/service.test.ts`, 20 tests).
 
 ## Done (2026-03-02 → latest)
 - Multichain E2E flow test fully passing (`configure → sign → status → idempotent rerun → regrant → second chain`).
