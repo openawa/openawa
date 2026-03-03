@@ -1,5 +1,7 @@
+import * as p from '@clack/prompts'
 import { Command } from 'commander'
-import { parseEther } from 'viem'
+import { Chains } from 'porto'
+import { parseEther, type Chain } from 'viem'
 import type { AgentWalletConfig } from '../lib/config.js'
 import { saveConfig } from '../lib/config.js'
 import { AppError, toAppError } from '../lib/errors.js'
@@ -7,6 +9,7 @@ import { runCommandAction } from '../lib/command.js'
 import { isInteractive } from '../lib/interactive.js'
 import type { OutputMode } from '../lib/output.js'
 import { promptPermissionPolicy } from '../lib/permission-prompts.js'
+import { getChainByIdOrName } from '../porto/service.js'
 import type { PermissionPolicy, SpendPeriod } from '../porto/service.js'
 import type { PortoService } from '../porto/service.js'
 import type { SignerService } from '../signer/service.js'
@@ -23,6 +26,7 @@ type ConfigureCheckpoint = {
 
 type ConfigureOptions = {
   call?: string[]          // address[:signature] (repeatable)
+  chain?: string           // chain name or id; interactive picker shown if omitted
   createAccount?: boolean
   dialog?: string
   expiry?: string          // days
@@ -30,10 +34,58 @@ type ConfigureOptions = {
   spendLimit?: string      // ETH decimal
   spendPeriod?: string     // 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
   spendToken?: string      // ERC-20 token address; omit for native
-  testnet?: boolean
 }
 
 const TOTAL_STEPS = 2
+
+// ── Chain selection ───────────────────────────────────────────────────────────
+
+async function resolveConfigureChain(options: ConfigureOptions): Promise<Chain> {
+  if (options.chain) {
+    const chain = getChainByIdOrName(options.chain)
+    if (!chain) {
+      throw new AppError(
+        'INVALID_CHAIN',
+        `Unknown chain: "${options.chain}". Use a chain name (e.g. base-sepolia) or numeric chain ID.`,
+      )
+    }
+    return chain
+  }
+
+  if (!isInteractive()) {
+    throw new AppError(
+      'NON_INTERACTIVE_REQUIRES_FLAGS',
+      'Non-interactive configure requires --chain <name|id> (e.g. --chain base-sepolia).',
+    )
+  }
+
+  // Interactive: show chain picker
+  // Group mainnets first (testnet === undefined or false), then testnets
+  const mainnets = Chains.all.filter((c) => !c.testnet)
+  const testnets = Chains.all.filter((c) => Boolean(c.testnet))
+
+  const chainOptions = [
+    ...mainnets.map((c) => ({ value: c.id, label: c.name, hint: `chain ID ${c.id}` })),
+    ...testnets.map((c) => ({ value: c.id, label: c.name, hint: `chain ID ${c.id} (testnet)` })),
+  ]
+
+  const selected = await p.select({
+    message: 'Select chain:',
+    initialValue: Chains.baseSepolia.id,
+    options: chainOptions,
+  })
+
+  if (p.isCancel(selected)) {
+    p.cancel('Cancelled')
+    process.exit(0)
+  }
+
+  const chain = Chains.all.find((c) => c.id === selected)
+  if (!chain) {
+    throw new AppError('INVALID_CHAIN', `Selected chain ID ${String(selected)} not found.`)
+  }
+  return chain
+}
 
 // ── Permission policy resolution ─────────────────────────────────────────────
 
@@ -46,13 +98,12 @@ function parseCallArg(value: string): { to: `0x${string}`; signature?: `0x${stri
   }
 }
 
-async function resolvePermissionPolicy(options: ConfigureOptions): Promise<PermissionPolicy> {
-  const testnet = options.testnet
+async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain): Promise<PermissionPolicy> {
   const prefillCalls = options.call?.length ? options.call.map(parseCallArg) : undefined
 
   if (isInteractive()) {
     return promptPermissionPolicy({
-      testnet,
+      chain,
       prefill: {
         calls: prefillCalls ?? null,
         spendLimit: options.spendLimit,
@@ -102,7 +153,7 @@ function nextActionForError(checkpoint: ConfigureCheckpointName, error: AppError
     case 'MISSING_ACCOUNT_ADDRESS':
       return 'Re-run configure and complete the account step in the dialog.'
     case 'MISSING_CHAIN_ID':
-      return 'Re-run configure with explicit network selection (for example: --testnet).'
+      return 'Re-run configure with --chain <name|id> (e.g. --chain base-sepolia).'
     case 'GRANT_FAILED':
       return 'Re-run configure and complete the permission grant in the dialog.'
     default:
@@ -188,6 +239,7 @@ async function runAccountStep(
   porto: PortoService,
   config: AgentWalletConfig,
   options: ConfigureOptions,
+  chain: Chain,
   policy: PermissionPolicy,
 ): Promise<AccountStepResult> {
   logStepStart({
@@ -210,9 +262,9 @@ async function runAccountStep(
     if (shouldOnboard) {
       const onboardResult = await porto.onboard({
         policy,
+        chain,
         createAccount: options.createAccount,
         dialogHost: options.dialog,
-        testnet: options.testnet,
       })
       address = onboardResult.address
       chainId = onboardResult.chainId
@@ -223,7 +275,7 @@ async function runAccountStep(
       saveConfig(config)
     } else {
       address = config.porto!.address!
-      chainId = config.porto?.chainId
+      chainId = chain.id
 
       // Only grant if no existing permission (on-chain or precall) matches what we'd grant.
       const existing = await porto.findMatchingPermission({
@@ -240,7 +292,7 @@ async function runAccountStep(
         summary = `Permission already configured (${permissionId}).`
         saveConfig(config)
       } else {
-        const grantResult = await porto.grant({ address, policy, chainId })
+        const grantResult = await porto.grant({ address, chain, policy })
         permissionId = grantResult.permissionId
         status = 'updated'
         summary = `Permission granted (${permissionId}).`
@@ -276,11 +328,12 @@ async function runConfigureFlow(
   process.stderr.write('Configure wallet (local-admin setup)\nPowered by Porto\n\n')
 
   const agentKeyCheckpoint = await runAgentKeyStep(signer, config)
-  const policy = await resolvePermissionPolicy(options)
-  const accountResult = await runAccountStep(porto, config, options, policy)
+  const chain = await resolveConfigureChain(options)
+  const policy = await resolvePermissionPolicy(options, chain)
+  const accountResult = await runAccountStep(porto, config, options, chain, policy)
 
   return {
-    account: { address: accountResult.address, chainId: accountResult.chainId ?? config.porto?.chainId },
+    account: { address: accountResult.address, chainId: accountResult.chainId ?? config.porto?.chainIds?.[0] },
     activation: {
       state: 'granted',
       ...(accountResult.permissionId ? { permissionId: accountResult.permissionId } : {}),
@@ -325,7 +378,7 @@ export function registerConfigureCommand(
   const cmd = program
     .command('configure')
     .description('Configure local-admin account, signer key, and default permissions')
-    .option('--testnet', 'Use Base Sepolia')
+    .option('--chain <name|id>', 'Chain name or ID (e.g. base-sepolia, 84532); interactive picker shown if omitted')
     .option('--dialog <hostname>', 'Dialog host', 'id.porto.sh')
     .option('--create-account', 'Force creation of a new account')
     .option(
@@ -338,27 +391,27 @@ export function registerConfigureCommand(
     .option('--spend-period <period>', 'Spend period: minute|hour|day|week|month|year (default: day)')
     .option('--expiry <days>', 'Permission validity in days (required when non-interactive)')
     .option('--spend-token <address>', 'ERC-20 token address for spend limit (default: native ETH)')
-    .option('--fee-limit <amount>', 'Fee cap per period; default: 25 EXP testnet / 0.01 ETH mainnet')
+    .option('--fee-limit <amount>', 'Fee cap per period; default: 25 EXP on Base Sepolia / 0.01 native on other chains')
 
   cmd.addHelpText('after', `
 Examples:
-  # Interactive (TTY): prompts for all options
+  # Interactive (TTY): prompts for chain and all options
   $ agent-wallet configure
 
-  # Non-interactive: any contract, 0.01 ETH/day, 7-day expiry
-  $ agent-wallet configure --spend-limit 0.01 --spend-period day --expiry 7
+  # Non-interactive: Base Sepolia, any contract, 0.01 ETH/day, 7-day expiry
+  $ agent-wallet configure --chain base-sepolia --spend-limit 0.01 --spend-period day --expiry 7
 
-  # Allowlist a specific contract address
-  $ agent-wallet configure --call 0xA0b8…eB48 --spend-limit 0.01 --expiry 7
+  # Allowlist a specific contract address on Base mainnet
+  $ agent-wallet configure --chain base --call 0xA0b8…eB48 --spend-limit 0.01 --expiry 7
 
   # Allowlist with a specific function selector
-  $ agent-wallet configure --call 0xA0b8…eB48:transfer(address,uint256) --spend-limit 0.01 --expiry 7
+  $ agent-wallet configure --chain base --call 0xA0b8…eB48:transfer(address,uint256) --spend-limit 0.01 --expiry 7
 
   # Multiple allowed contracts
-  $ agent-wallet configure --call 0xA0b8…eB48 --call 0xdead…beef --spend-limit 0.01 --expiry 7
+  $ agent-wallet configure --chain base --call 0xA0b8…eB48 --call 0xdead…beef --spend-limit 0.01 --expiry 7
 
-  # ERC-20 spend token with custom fee cap (testnet)
-  $ agent-wallet configure --spend-token 0xfca4…c64e --spend-limit 100 --expiry 30 --fee-limit 25 --testnet`)
+  # ERC-20 spend token with custom fee cap (Base Sepolia testnet)
+  $ agent-wallet configure --chain base-sepolia --spend-token 0xfca4…c64e --spend-limit 100 --expiry 30 --fee-limit 25`)
 
   cmd.action((options: ConfigureOptions) =>
     runCommandAction(cmd, 'human', (mode) => runConfigureFlow(mode, options, config, porto, signer), renderHuman),

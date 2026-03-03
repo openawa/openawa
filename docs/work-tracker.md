@@ -6,14 +6,10 @@
 - Canonical spec: `/Users/jean/src/github.com/jeanregisser/agent-wallet/docs/cli-spec.md`
 - Workflow policy: `/Users/jean/src/github.com/jeanregisser/agent-wallet/AGENTS.md`
 
-Latest validation on this machine (2026-02-20):
+Latest validation on this machine (2026-03-02):
 - `npm run typecheck` -> pass
 - `npm run build` -> pass
-- `AGENT_WALLET_E2E_DEBUG=1 npm run test:e2e` -> pass (`4 passed / 0 failed`)
-- `AGENT_WALLET_E2E_DEBUG=1 npx vitest run --project e2e test/e2e/sign.e2e.ts` -> pass
-- `sign.e2e` live debug run:
-  - allowlisted call succeeds via relay send and returns a real onchain `txHash` when receipt is available
-  - non-allowlisted call fails deterministically with `PORTO_SEND_PREPARE_FAILED` and `UnauthorizedCall`
+- `CHIPKEY_BINARY=... AGENT_WALLET_E2E_DEBUG=1 npx vitest run --project e2e test/e2e/flow.e2e.ts` -> pass (`1 passed / 0 failed`, ~21s)
 
 ## Key Insights (Precall Model)
 - Configure can be frictionless and still safe by using Porto precalls first (`wallet_grantPermissions`) and deferring activation to first real send.
@@ -24,21 +20,57 @@ Latest validation on this machine (2026-02-20):
 - Idempotency with precalls requires local pending-state memory to avoid re-queuing the same permission envelope on rerun.
 - If intent changes before activation, queueing a newer precall is acceptable, but configure must state that activation is still pending.
 
+## Key Insights (Multichain Permission Model)
+- Porto `wallet_connect` response permissions each have `chainId?: number` (confirmed from `rpc.d.ts` and live responses).
+- Porto returns **2 entries** per permission per response. The dialog server (`id.porto.sh`) returns both the relay's currently stored key AND the newly requested key in `capabilities.permissions`. Porto has no persistent client-side state between CLI runs (`Storage.memory()` in Node.js), so both entries originate server-side.
+  - Entry 1 = relay's stored representation: `token: "0x0000..."` for native, includes fee-relay call `0x36a7...`, **old spend amounts** (on-chain update is async/pending so stored amounts are stale).
+  - Entry 2 = newly requested key: `token: null` for native, just the requested calls, **new spend amounts** after `resolvePermissions`.
+  - Both share the same `chainId`, `id`, and `expiry` (the new expiry from this grant).
+- In multi-chain responses, Porto returns entries for ALL chains the key has active permissions on, each tagged with the correct `chainId`.
+- `findGrantedPermission` filters by `publicKey`, then by `chainId`, then picks the **last** entry when expiries are equal (`>=` not `>`) to get entry 2 (newly requested, correct permissions) not entry 1 (relay-stored, stale).
+- Spend limits are **per-chain** (enforced by the per-chain smart contract); the relay stores `HashMap<ChainId, Vec<AuthorizeKeyResponse>>`. Entry 1 for a new chain echoes whatever the relay last stored for that key globally — stale data from a prior chain's grant.
+- The native spend value in entry 2 is larger than what you request: `resolvePermissions` in Porto merges the native `feeToken.limit` into the native `spend` entry (user spend + fee cap = stored native limit).
+- Vitest `pretty-format` serializes plain object keys ALPHABETICALLY: `"11155420"` sorts before `"84532"` in inline snapshots.
+
+## Known Upstream Issues
+
+### Relay: `wallet_getKeys` leaks session keys cross-chain for pre-delegation accounts
+- **Root cause**: `upgradeAccount` stores a `CreatableAccount` in the `accounts` table keyed by address only (no chain_id). When `wallet_getKeys` is called for a chain where the account isn't yet delegated, `get_keys_for_chain` falls back to `read_account` and returns ALL keys — including session keys that were only granted on the original chain.
+- **Fix authored** (not yet merged): `~/src/github.com/ithacaxyz/relay` — added `chain_id: Option<u64>` to `CreatableAccount`, filter to admin-only keys in the fallback when chain doesn't match. Files: `src/types/storage.rs`, `src/rpc/relay.rs`, `tests/e2e/cases/keys.rs`, `tests/storage/roundtrip.rs`.
+- **Agent-wallet impact**: Low. `getActivePermissions` already passes `chainIds: [chain.id]` and filters by `role === 'normal'` + public key match, so it won't misuse leaked keys. Worst case: `status` could show a permission as present on a chain where it's only pending via precall.
+
 ## Now
-- Stabilize and document activation-state transitions (`pending_activation` -> `active_onchain`) in a dedicated live e2e scenario.
-- Keep configure/status human messaging explicit about `active_onchain` vs `pending_activation`.
-- Decide whether to expose optional operator-facing debug toggles for runtime command traces (without changing normal output contract).
+- Expand colocated unit coverage under `src/**`: add tests for `getChainByIdOrName`, `resolveCommandChain`.
 
 ## Next
 - Move Secure Enclave opaque handle storage from config into keychain item.
 - Introduce account profile model with alias + default selection.
-- Expand colocated unit coverage under `src/**`.
+- Expand colocated unit coverage under `src/**`: add tests for `getChainByIdOrName`, `resolveCommandChain`.
 - Decide CI strategy for live passkey e2e (scheduled/manual vs per-PR).
 
 ## Later
 - Remote-admin setup (out-of-band admin ceremony from separate device).
 - Multi-account aliases and default profile ergonomics.
 - Evaluate additional backend adapters after Porto-first UX stabilizes.
+
+## Done (2026-03-02 → latest)
+- Multichain E2E flow test fully passing (`configure → sign → status → idempotent rerun → regrant → second chain`).
+  - Fixed snapshot key ordering: Vitest `pretty-format` sorts object keys alphabetically, so `"11155420"` comes before `"84532"` in serialized `chains` objects.
+  - Fixed `findGrantedPermission` helper: Porto returns 2 entries per permission (before/after state); added `chainId` filtering + changed `>` to `>=` in reduce so we always store the "after" state (entry 2, as-requested) rather than the "before" state (entry 1, stale relay cache).
+  - Updated `configAfterRegrant` and `configAfterSecondChain` snapshots to reflect correct "after" state: single call entry without fee-relay address, `token: null` for native spend, correct 20e15 native limit (user 10e15 + fee 10e15).
+- `npm run test:e2e` → pass (`1 passed / 0 failed`, ~21s).
+
+## Done (2026-03-02)
+- Implemented proper multichain support (`--chain` flag, `chainIds[]` config, per-chain status).
+  - Replaced `--testnet` with `--chain <name|id>` across all commands.
+  - Added `getChainByIdOrName` and `resolveCommandChain` helpers in `porto/service.ts`.
+  - Config schema: `chainId`+`testnet` → `chainIds: number[]` (with migration for legacy configs).
+  - `configure`: interactive chain picker (single-select, all Porto chains, mainnets first) when TTY and no `--chain`.
+  - `sign`: `AMBIGUOUS_CHAIN` error when multiple chains configured and no `--chain` flag.
+  - `status`: per-chain permissions + balance for all configured `chainIds`.
+  - E2E flow test extended with second-chain step (OP Sepolia) + multichain invariants.
+  - Porto initialized with `Chains.all` (all supported chains), not just Base+BaseSepolia.
+  - `docs/cli-spec.md` updated to v0.3 with full multichain model documentation.
 
 ## Done
 - Reworked `configure` into explicit linear phases and steps with `Now`/`You`/`Result`/`Next`.

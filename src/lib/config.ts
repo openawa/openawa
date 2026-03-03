@@ -23,9 +23,8 @@ export type AgentWalletConfig = {
   }
   porto?: {
     address?: `0x${string}`
-    chainId?: number
+    chainIds: number[]
     dialogHost?: string
-    testnet?: boolean
     precallPermissions: PrecallPermission[]
   }
 }
@@ -36,6 +35,7 @@ const DEFAULT_CONFIG: AgentWalletConfig = {
     backend: 'chipkey',
   },
   porto: {
+    chainIds: [],
     precallPermissions: [],
   },
 }
@@ -72,8 +72,27 @@ export function loadConfig(): AgentWalletConfig {
   }
 
   const raw = fs.readFileSync(configPath, 'utf8')
-  const parsed = JSON.parse(raw) as Partial<AgentWalletConfig>
-  const parsedPorto: Partial<NonNullable<AgentWalletConfig['porto']>> = parsed.porto ?? {}
+  type RawPorto = {
+    address?: `0x${string}`
+    chainId?: number
+    chainIds?: number[]
+    dialogHost?: string
+    testnet?: boolean
+    precallPermissions?: PrecallPermission[]
+  }
+  const parsed = JSON.parse(raw) as Partial<AgentWalletConfig> & { porto?: RawPorto }
+  const parsedPorto: RawPorto = parsed.porto ?? {}
+
+  // Migrate legacy chainId/testnet → chainIds
+  let chainIds: number[] = []
+  if (Array.isArray(parsedPorto.chainIds)) {
+    chainIds = parsedPorto.chainIds
+  } else if (typeof parsedPorto.chainId === 'number') {
+    chainIds = [parsedPorto.chainId]
+  } else if (typeof parsedPorto.testnet === 'boolean') {
+    // baseSepolia=84532, base=8453
+    chainIds = [parsedPorto.testnet ? 84532 : 8453]
+  }
 
   return {
     ...DEFAULT_CONFIG,
@@ -83,11 +102,10 @@ export function loadConfig(): AgentWalletConfig {
       ...parsed.signer,
     },
     porto: {
+      chainIds,
       precallPermissions: parsedPorto.precallPermissions ?? [],
       ...(parsedPorto.address ? { address: parsedPorto.address } : {}),
-      ...(typeof parsedPorto.chainId === 'number' ? { chainId: parsedPorto.chainId } : {}),
       ...(parsedPorto.dialogHost ? { dialogHost: parsedPorto.dialogHost } : {}),
-      ...(typeof parsedPorto.testnet === 'boolean' ? { testnet: parsedPorto.testnet } : {}),
     },
   }
 }

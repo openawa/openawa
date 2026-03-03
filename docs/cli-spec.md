@@ -1,4 +1,4 @@
-# CLI Spec (v0.2)
+# CLI Spec (v0.3)
 
 ## Product Direction
 `agent-wallet` is a security-first wallet CLI for autonomous agents.
@@ -59,7 +59,7 @@ flowchart LR
 Three user-facing commands:
 
 ### 1. `agent-wallet configure`
-Configures one account end-to-end:
+Configures one account end-to-end for a single chain per run:
 - create or reuse account
 - initialize/reuse local agent signing key
 - grant permissions using Porto inline grant via `wallet_connect`
@@ -71,17 +71,31 @@ Expected characteristics:
 - explicit human progress output with step context
 - per-step operator guidance (`Now`, `You`, result, and next action on failure)
 
+#### Chain selection (`--chain`)
+- `--chain <name|id>`: selects the chain for this configure run (required in non-interactive mode).
+  - Accepted forms: numeric chain ID (`8453`), viem chain name — case-insensitive, spaces/hyphens ignored:
+    - `base-sepolia`, `Base Sepolia`, `basesepolia` → Base Sepolia (chainId 84532)
+    - `op-mainnet`, `OP Mainnet`, `opmainnet` → OP Mainnet (chainId 10)
+    - `arbitrum-one`, `Arbitrum One` → Arbitrum One (chainId 42161)
+  - Interactive fallback (TTY, no `--chain`): shows a chain picker (single-select) listing all Porto-supported chains, grouped mainnets first then testnets, default highlighted: Base Sepolia.
+  - Non-interactive + no `--chain` → `NON_INTERACTIVE_REQUIRES_FLAGS` error.
+- One chain per configure run. Running again for a different chain adds it to the config.
+- Config stores `chainIds[]` accumulating across runs.
+
 MVP policy:
 - `configure` supports local-admin setup only.
 - `configure` is add-only: to revoke permissions, use id.porto.sh.
 - Remote-admin/out-of-band setup (admin ceremony on another device) is explicitly deferred.
-- Permission policy (call allowlist, spend limits, expiry) is hardcoded to permissive defaults for now.
-  See `docs/permissions-plan.md` for the planned user-configurable policy approach.
+- Permission policy (call allowlist, spend limits, expiry) is configurable via flags or interactive prompts.
 
-Default permission envelope (hardcoded):
+Default permission envelope:
 - Calls: any target, any function selector
-- Spend: $100/day
-- Expiry: 7 days
+- Spend: user-specified (required flag in non-interactive)
+- Expiry: user-specified (required flag in non-interactive)
+
+Fee cap defaults per chain:
+- Base Sepolia: 25 EXP/period (EXP is a non-native fee token on Base Sepolia)
+- All other chains: 0.01 native currency/period
 
 Idempotency semantics:
 - `configure` must never create duplicate signer keys or duplicate permission grants.
@@ -113,22 +127,39 @@ For MVP this is call-bundle oriented:
 - return both relay bundle id and send status
 - avoid ambiguity between relay and chain identifiers: `bundleId` is relay-only, `txHash` is onchain-only
 
+#### Chain selection (`--chain`)
+- `--chain <name|id>`: selects which configured chain to use (same resolution as `configure`).
+- Single chain configured, no flag → use it (no behavior change).
+- Multiple chains, no flag → `AMBIGUOUS_CHAIN` error listing configured chains with `--chain` hints.
+
 Advanced/raw signing is out of scope for MVP.
 
 ### 3. `agent-wallet status`
 Inspection command.
 
 Should include:
-- active account/profile
+- active account address
 - backend/provider in use
-- activation state (`active_onchain` or `unconfigured`)
+- activation state (`active_onchain`, `precall_pending`, or `unconfigured`)
 - key backend health
-- granted permissions summary + expiry
-- balance snapshot per configured chain
+- per-chain permissions summary + balance (for all configured chains)
+- optional `--chain <name|id>` to filter to a single chain
 
 MVP status behavior:
 - `status` permission summary is derived from Relay key state and does not initiate a dialog connect.
 - If no active agent permission is found on Relay, permissions summary reports zero and activation state is `unconfigured`.
+- Without `--chain`, all configured chains are shown.
+
+## Chain Model
+- One chain per `configure` run; config stores `chainIds: number[]` accumulating across runs.
+- First configured chain is the primary; order is maintained.
+- `sign` requires exactly one chain: auto-resolved when only one is configured, explicit `--chain` when multiple.
+- `status` shows all configured chains by default; `--chain` filters to one.
+- Porto uses a single relay (`rpc.porto.sh`) that serves all supported chains — no separate relay configuration needed.
+
+Supported chains (sourced from `porto.Chains.all`):
+- Mainnets: Base (8453), Arbitrum One (42161), Berachain (80094), BNB Smart Chain (56), Celo (42220), Ethereum (1), OP Mainnet (10), Polygon (137), Gnosis (100), Katana (747474)
+- Testnets: Base Sepolia (84532), Arbitrum Sepolia (421614), Berachain Bepolia (80069), Hoodi (560048), OP Sepolia (11155420), Sepolia (11155111)
 
 ## Account Model
 - Multiple accounts are first-class in the data model.
@@ -139,7 +170,7 @@ MVP status behavior:
 ## Internal Architecture
 - Keep provider details behind an adapter boundary.
 - Current adapter: Porto.
-- Keep “Powered by Porto” visible in docs/version/status output.
+- Keep "Powered by Porto" visible in docs/version/status output.
 - Avoid premature multi-provider abstraction complexity until a second backend is real.
 
 ## Custody Stance
@@ -170,6 +201,12 @@ All command failures return:
 { "ok": false, "error": { "code": "...", "message": "...", "details": {} } }
 ```
 
+Notable error codes:
+- `MISSING_CHAIN_ID`: no chain configured; run `configure --chain <name>` first.
+- `AMBIGUOUS_CHAIN`: multiple chains configured but no `--chain` flag given.
+- `INVALID_CHAIN`: unknown chain name or ID provided.
+- `CHAIN_NOT_CONFIGURED`: specified chain exists but hasn't been configured yet.
+
 ## Testing (E2E)
 Strategy:
 - Prefer a small number of scenario tests with broad coverage over many narrow tests.
@@ -185,8 +222,12 @@ Required scenario set (concise but high-signal):
 - Happy path: call succeeds with a valid bundle ID.
 - Output invariant: JSON response schema is stable.
 3. `status.e2e`
-- Happy path: reports account, permissions summary, and balances.
+- Happy path: reports account, per-chain permissions summary, and balances.
 - Output invariant: both `--json` and `--human` modes work.
+4. Multi-chain invariant:
+- After configuring two chains, `sign` without `--chain` fails with `AMBIGUOUS_CHAIN`.
+- `sign --chain <name>` works for each configured chain.
+- `status` shows both chains.
 
 Notes:
 - E2E defaults to testnet (Base Sepolia + faucet funding) for automation reliability, with optional prod override for manual smoke checks.
@@ -219,3 +260,4 @@ Porto remains an internal adapter and is not exposed as a dedicated CLI command 
 - [x] Add E2E coverage for new top-level command surface.
 - [ ] Add remote-admin setup mode (out-of-band admin ceremony from separate device).
 - [ ] Evaluate additional backend adapters (e.g., ZeroDev, Privy, Para, others) using security/custody/lock-in criteria before adding support.
+- [x] Proper multichain support: `--chain` flag, `chainIds[]` config, per-chain status.

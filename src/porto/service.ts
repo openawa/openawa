@@ -44,20 +44,20 @@ type SendCall = {
 
 type OnboardOptions = {
   policy: PermissionPolicy
+  chain: Chain
   createAccount?: boolean
   dialogHost?: string
-  testnet?: boolean
 }
 
 type GrantOptions = {
   address?: `0x${string}`
+  chain: Chain
   policy: PermissionPolicy
-  chainId?: number
 }
 
 type SendOptions = {
   address?: `0x${string}`
-  chainId?: number
+  chain: Chain
   calls: string
 }
 
@@ -121,25 +121,69 @@ type AgentPermissionSnapshot = {
   }
 }
 
-function getChain(testnet?: boolean) {
-  return testnet ? Chains.baseSepolia : Chains.base
+/**
+ * Resolves a Porto chain by numeric ID or by name (case-insensitive, spaces/hyphens ignored).
+ * Examples: 8453, "base-sepolia", "Base Sepolia", "basesepolia", "op-mainnet", "opmainnet"
+ */
+export function getChainByIdOrName(idOrName: string | number): Chain | undefined {
+  const asId = typeof idOrName === 'number' ? idOrName : parseInt(idOrName, 10)
+  if (!isNaN(asId)) return Chains.all.find((c) => c.id === asId)
+  const key = String(idOrName).toLowerCase().replace(/[\s-]+/g, '')
+  return Chains.all.find((c) => c.name.toLowerCase().replace(/[\s-]+/g, '') === key)
 }
 
-function getChainById(chainId?: number) {
-  if (!chainId) return undefined
-  if (chainId === Chains.base.id) return Chains.base
-  if (chainId === Chains.baseSepolia.id) return Chains.baseSepolia
-  return undefined
+/**
+ * Resolves the chain for a command given the config and an optional --chain flag.
+ * - 0 chains configured → MISSING_CHAIN_ID error
+ * - 1 chain, no flag → return that chain silently
+ * - N chains, no flag → AMBIGUOUS_CHAIN error with list
+ * - flag provided → resolve by name/id, validate it's in configured set
+ */
+export function resolveCommandChain(config: AgentWalletConfig, chainFlag?: string): Chain {
+  const chainIds = config.porto?.chainIds ?? []
+
+  if (chainFlag) {
+    const chain = getChainByIdOrName(chainFlag)
+    if (!chain) {
+      throw new AppError('INVALID_CHAIN', `Unknown chain: "${chainFlag}". Use a chain name (e.g. base-sepolia) or numeric chain ID.`)
+    }
+    if (chainIds.length > 0 && !chainIds.includes(chain.id)) {
+      const knownNames = chainIds
+        .map((id) => Chains.all.find((c) => c.id === id)?.name.toLowerCase().replace(/[\s-]+/g, '-') ?? String(id))
+      throw new AppError(
+        'CHAIN_NOT_CONFIGURED',
+        `Chain "${chainFlag}" is not configured. Run \`agent-wallet configure --chain ${chainFlag}\` first.\nConfigured: ${knownNames.join(', ')}`,
+      )
+    }
+    return chain
+  }
+
+  if (chainIds.length === 0) {
+    throw new AppError('MISSING_CHAIN_ID', 'No chain configured. Run `agent-wallet configure --chain <name>` first.')
+  }
+
+  if (chainIds.length === 1) {
+    const chain = Chains.all.find((c) => c.id === chainIds[0])
+    if (!chain) {
+      throw new AppError('MISSING_CHAIN_ID', `Configured chain ID ${String(chainIds[0])} is not a supported Porto chain.`)
+    }
+    return chain
+  }
+
+  // Multiple chains configured, no flag
+  const names = chainIds.map(
+    (id) => Chains.all.find((c) => c.id === id)?.name.toLowerCase().replace(/\s+/g, '-') ?? String(id),
+  )
+  throw new AppError(
+    'AMBIGUOUS_CHAIN',
+    `Multiple chains configured. Use --chain to specify one:\n${names.map((n) => `  --chain ${n}`).join('\n')}`,
+  )
 }
 
 function resolveConfiguredChain(config: AgentWalletConfig, overrideChainId?: number): Chain | undefined {
-  const configured = getChainById(overrideChainId ?? config.porto?.chainId)
-  if (configured) return configured
-
-  if (config.porto?.testnet === true) return Chains.baseSepolia
-  if (config.porto?.testnet === false) return Chains.base
-
-  return undefined
+  const chainId = overrideChainId ?? config.porto?.chainIds?.[0]
+  if (!chainId) return undefined
+  return Chains.all.find((c) => c.id === chainId)
 }
 
 function normalizeDialogHost(host?: string) {
@@ -343,6 +387,38 @@ function sleep(ms: number) {
   })
 }
 
+/**
+ * Finds the granted permission for a specific key and chain from a wallet_connect response.
+ *
+ * On regrants (and cross-chain grants) Porto returns 2 entries with the same chainId, id,
+ * and expiry:
+ *   1. Stale — the relay's previously stored data for this key, with fee-relay call targets
+ *      and selectors injected, and spend limits that may belong to a different chain (known
+ *      relay bug: session keys leak cross-chain via the `accounts` table fallback).
+ *   2. Correct — the permission as actually requested for this chain.
+ *
+ * Strategy: filter by publicKey, then by chainId, then pick the last entry when expiries are
+ * equal (>= not >) so we always get entry 2 (the correct, as-requested permission).
+ *
+ * When chainId is provided and no entries match that chain, returns undefined — permissions
+ * are chain-scoped.
+ */
+function findGrantedPermission<T extends { chainId?: number; expiry: number; key: { publicKey: string } }>(
+  permissions: readonly T[] | undefined,
+  publicKey: string,
+  chainId?: number,
+): T | undefined {
+  let matching = (permissions ?? []).filter(
+    (p) => p.key.publicKey.toLowerCase() === publicKey.toLowerCase(),
+  )
+  if (matching.length === 0) return undefined
+  if (chainId !== undefined) {
+    matching = matching.filter((p) => p.chainId === chainId)
+    if (matching.length === 0) return undefined
+  }
+  return matching.reduce((best, p) => (p.expiry >= best.expiry ? p : best))
+}
+
 type CallsStatusSnapshot = Awaited<ReturnType<typeof getCallsStatus>>
 
 function extractTransactionHash(snapshot: CallsStatusSnapshot) {
@@ -406,9 +482,9 @@ let hasRegisteredSessionCleanup = false
 
 async function getWalletClient(options: {
   address?: `0x${string}`
+  chain?: Chain
   dialogHost?: string
   mode?: 'dialog' | 'relay'
-  testnet?: boolean
 }) {
   if (sharedWalletSession) {
     return {
@@ -417,14 +493,14 @@ async function getWalletClient(options: {
     }
   }
 
-  const chain = getChain(options.testnet)
+  const chain = options.chain ?? Chains.baseSepolia
   const transportMode = options.mode ?? 'dialog'
   let porto: ReturnType<typeof Porto.create>
 
   if (transportMode === 'relay') {
     porto = Porto.create({
       announceProvider: false,
-      chains: [Chains.base, Chains.baseSepolia],
+      chains: [...Chains.all],
       mode: Mode.relay(),
       relay: http(normalizeRelayRpcUrl()),
     })
@@ -433,7 +509,7 @@ async function getWalletClient(options: {
     const host = normalizeDialogHost(options.dialogHost)
     porto = Porto.create({
       announceProvider: false,
-      chains: [Chains.base, Chains.baseSepolia],
+      chains: [...Chains.all],
       mode: Mode.dialog({
         host: new URL('/dialog', `https://${host}`).toString(),
         renderer: await createCliDialog(),
@@ -502,7 +578,7 @@ export class PortoService {
   }
 
   private async buildGrantPermissionsParam(
-    chain: ReturnType<typeof getChain>,
+    chain: Chain,
     policy: PermissionPolicy,
   ) {
     const key = await this.signer.getPortoKey()
@@ -663,13 +739,13 @@ export class PortoService {
   }
 
   async onboard(options: OnboardOptions) {
-    const chain = getChain(options.testnet)
+    const chain = options.chain
     let session: Awaited<ReturnType<typeof getWalletClient>> | undefined
     try {
       try {
         session = await getWalletClient({
+          chain,
           dialogHost: options.dialogHost,
-          testnet: options.testnet,
         })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -700,8 +776,10 @@ export class PortoService {
         throw new AppError('ONBOARD_FAILED', 'Porto onboarding did not return an account address.')
       }
 
-      const grantedPermission = response.accounts[0]?.capabilities?.permissions?.find(
-        (p) => p.key.publicKey.toLowerCase() === grantPermissionsParam.key.publicKey.toLowerCase(),
+      const grantedPermission = findGrantedPermission(
+        response.accounts[0]?.capabilities?.permissions,
+        grantPermissionsParam.key.publicKey,
+        chain.id,
       ) ?? null
 
       // Align with Porto CLI UX: notify dialog of success so the web page
@@ -726,12 +804,14 @@ export class PortoService {
         this.config.porto?.address &&
         this.config.porto.address.toLowerCase() !== account.address.toLowerCase()
 
+      const existingChainIds = this.config.porto?.chainIds ?? []
+      const newChainIds = [...new Set([...existingChainIds, chain.id])]
+
       this.config.porto = {
         ...this.config.porto,
         address: account.address,
-        chainId: chain.id,
+        chainIds: newChainIds,
         dialogHost: normalizeDialogHost(options.dialogHost),
-        testnet: Boolean(options.testnet),
         precallPermissions: addressChanged ? [] : (this.config.porto?.precallPermissions ?? []),
       }
 
@@ -753,18 +833,16 @@ export class PortoService {
 
   async grant(options: GrantOptions) {
     const address = options.address ?? this.config.porto?.address
-    const chain = resolveConfiguredChain(this.config, options.chainId) ?? getChain(this.config.porto?.testnet)
-    // resolveConfiguredChain may return a generic Chain; narrow to the concrete type expected below.
-    const concreteChain = (chain.id === Chains.baseSepolia.id ? Chains.baseSepolia : Chains.base) as ReturnType<typeof getChain>
+    const chain = options.chain
 
     const session = await getWalletClient({
       address,
+      chain,
       dialogHost: this.config.porto?.dialogHost,
-      testnet: this.config.porto?.testnet,
     })
 
     try {
-      const grantPermissionsParam = await this.buildGrantPermissionsParam(concreteChain, options.policy)
+      const grantPermissionsParam = await this.buildGrantPermissionsParam(chain, options.policy)
 
       const connectResponse = await WalletActions.connect(session.client, {
         chainIds: [chain.id],
@@ -772,8 +850,10 @@ export class PortoService {
         grantPermissions: grantPermissionsParam,
       })
 
-      const grantedPermission = connectResponse.accounts[0]?.capabilities?.permissions?.find(
-        (p) => p.key.publicKey.toLowerCase() === grantPermissionsParam.key.publicKey.toLowerCase(),
+      const grantedPermission = findGrantedPermission(
+        connectResponse.accounts[0]?.capabilities?.permissions,
+        grantPermissionsParam.key.publicKey,
+        chain.id,
       )
 
       if (!grantedPermission) {
@@ -797,8 +877,12 @@ export class PortoService {
 
       const resolvedAddress = (options.address ?? this.config.porto?.address) as `0x${string}`
 
+      const existingChainIds = this.config.porto?.chainIds ?? []
+      const newChainIds = [...new Set([...existingChainIds, chain.id])]
+
       this.config.porto = {
         ...this.config.porto,
+        chainIds: newChainIds,
         precallPermissions: this.config.porto?.precallPermissions ?? [],
       }
 
@@ -815,21 +899,21 @@ export class PortoService {
   }
 
   async fund(options: FundOptions) {
+    const chain = resolveConfiguredChain(this.config, options.chainId)
+    if (!chain) {
+      throw new AppError('MISSING_CHAIN_ID', 'No chain configured. Re-run configure with an explicit network.')
+    }
+
     const session = await getWalletClient({
       address: options.address ?? this.config.porto?.address,
+      chain,
       dialogHost: this.config.porto?.dialogHost,
-      testnet: this.config.porto?.testnet,
     })
 
     try {
       const address = options.address ?? this.config.porto?.address
       if (!address) {
         throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `agent-wallet configure` first.')
-      }
-
-      const chain = resolveConfiguredChain(this.config, options.chainId)
-      if (!chain) {
-        throw new AppError('MISSING_CHAIN_ID', 'No chain configured. Re-run configure with an explicit network.')
       }
 
       await WalletActions.connect(session.client, {
@@ -883,11 +967,13 @@ export class PortoService {
   }
 
   async send(options: SendOptions) {
+    const chain = options.chain
+
     const session = await getWalletClient({
       address: options.address ?? this.config.porto?.address,
+      chain,
       dialogHost: this.config.porto?.dialogHost,
       mode: 'relay',
-      testnet: this.config.porto?.testnet,
     })
 
     let stage: 'prepare_calls' | 'sign_digest' | 'send_prepared' = 'prepare_calls'
@@ -896,7 +982,6 @@ export class PortoService {
       const key = await this.signer.getPortoKey()
       const calls = parseSendCalls(options.calls)
       const resolvedAddress = options.address ?? this.config.porto?.address
-      const resolvedChainId = options.chainId ?? this.config.porto?.chainId
 
       let prepared: Awaited<ReturnType<typeof WalletActions.prepareCalls>>
       try {
@@ -904,7 +989,7 @@ export class PortoService {
         prepared = await withTimeout(
           WalletActions.prepareCalls(session.client, {
             calls: calls as any,
-            chainId: resolvedChainId,
+            chainId: chain.id,
             from: resolvedAddress,
             key,
           }),
@@ -991,7 +1076,6 @@ export class PortoService {
     const permissions = await this.listAgentPermissions({
       address: options.address,
       chainId: options.chainId,
-      includeExpired: true,
     })
 
     return {

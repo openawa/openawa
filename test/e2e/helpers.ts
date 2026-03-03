@@ -33,7 +33,7 @@ type IsolatedEnv = {
 type AgentWalletConfig = {
   porto?: {
     address?: `0x${string}`
-    chainId?: number
+    chainIds?: number[]
     precallPermissions?: unknown[]
   }
 }
@@ -288,21 +288,20 @@ export function extractDialogUrl(line: string): string | null {
 
 export function buildConfigureArgs(parameters: {
   calls?: string[]         // address[:signature] entries
+  chain: string            // chain name or id (e.g. 'base-sepolia')
   createAccount?: boolean
   dialogHost?: string
   expiry?: string
   mode: 'human' | 'json'
-  network: 'prod' | 'testnet'
   spendLimit?: string
   spendPeriod?: string
 }): string[] {
-  const { calls, createAccount, dialogHost, expiry, mode, network, spendLimit, spendPeriod } = parameters
+  const { calls, chain, createAccount, dialogHost, expiry, mode, spendLimit, spendPeriod } = parameters
 
-  const args = ['configure', `--${mode}`]
+  const args = ['configure', `--${mode}`, '--chain', chain]
 
   for (const call of calls ?? []) args.push('--call', call)
   if (createAccount) args.push('--create-account')
-  if (network === 'testnet') args.push('--testnet')
   if (dialogHost) args.push('--dialog', dialogHost)
   if (spendLimit) args.push('--spend-limit', spendLimit)
   if (spendPeriod) args.push('--spend-period', spendPeriod)

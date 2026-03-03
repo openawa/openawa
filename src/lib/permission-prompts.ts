@@ -1,11 +1,13 @@
 import * as p from '@clack/prompts'
 import { parseEther } from 'viem'
+import type { Chain } from 'viem'
+import { Chains } from 'porto'
 import type { PermissionPolicy, SpendPeriod } from '../porto/service.js'
 
 const SPEND_PERIODS = ['minute', 'hour', 'day', 'week', 'month', 'year'] as const
 
 export async function promptPermissionPolicy(opts: {
-  testnet?: boolean
+  chain: Chain
   prefill?: {
     calls?: PermissionPolicy['calls']
     spendLimit?: string
@@ -83,10 +85,12 @@ export async function promptPermissionPolicy(opts: {
   })
   if (p.isCancel(spendAmount)) { p.cancel('Cancelled'); process.exit(0) }
 
-  const feeUnit = opts.testnet ? 'EXP' : 'ETH'
-  const defaultFeeLimit = opts.testnet ? '25' : '0.01'
+  // Base Sepolia uses EXP (non-native fee token); all other chains use native currency
+  const isBaseSepolia = opts.chain.id === Chains.baseSepolia.id
+  const feeUnit = isBaseSepolia ? 'EXP' : opts.chain.nativeCurrency.symbol
+  const defaultFeeLimit = isBaseSepolia ? '25' : '0.01'
   const feeLimit = await p.text({
-    message: `Fee cap per period in ${feeUnit}:`,
+    message: `Fee cap per period (${feeUnit}):`,
     placeholder: defaultFeeLimit,
     initialValue: opts.prefill?.feeLimit ?? defaultFeeLimit,
     validate: (v) => isNaN(Number(v)) ? `Must be a valid ${feeUnit} amount` : undefined,

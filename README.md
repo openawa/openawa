@@ -110,6 +110,18 @@ node dist/agent-wallet.js status --human
 Spec source of truth:
 - `/Users/jean/src/github.com/jeanregisser/agent-wallet/docs/cli-spec.md`
 
+## Known Issues
+
+### Multichain status may show stale permissions on undeployed chains
+
+When an account is configured on multiple chains, `status` may briefly show incorrect permission details (spend limits, call targets) for chains where the account hasn't been deployed on-chain yet.
+
+**Root cause**: The Porto relay stores account setup data in a table keyed by address only (no chain_id). When `wallet_getKeys` is called for a chain where the account isn't yet delegated, the relay falls back to this table and returns all keys — including session key permissions that belong to a different chain.
+
+**Scope**: Only affects the window between `configure` and the first on-chain transaction on each chain. Once a chain has a committed transaction, keys are read from on-chain and the stale data is never consulted.
+
+**Mitigation**: A fix has been authored in the relay ([`CreatableAccount` chain_id scoping](docs/work-tracker.md#known-upstream-issues)) but is not yet merged upstream. The agent-wallet code is written to be correct once the relay fix lands — `findGrantedPermission` does not fall back across chains.
+
 ## Near-Term Priorities
 - Move signer handle persistence into keychain.
 - Add remote-admin setup as a post-MVP mode.
