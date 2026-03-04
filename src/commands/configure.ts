@@ -1,17 +1,14 @@
 import * as p from '@clack/prompts'
-import { Command } from 'commander'
+import { Cli, z } from 'incur'
 import { Chains } from 'porto'
 import { parseEther, type Chain } from 'viem'
-import type { AgentWalletConfig } from '../lib/config.js'
-import { saveConfig } from '../lib/config.js'
+import { varsSchema } from '../lib/vars.js'
+import { saveConfig, type AgentWalletConfig } from '../lib/config.js'
 import { AppError, toAppError } from '../lib/errors.js'
-import { runCommandAction } from '../lib/command.js'
-import { isInteractive } from '../lib/interactive.js'
-import type { OutputMode } from '../lib/output.js'
+import { Address } from '../lib/zod.js'
 import { promptPermissionPolicy } from '../lib/permission-prompts.js'
 import { getChainByIdOrName } from '../porto/service.js'
-import type { PermissionPolicy, SpendPeriod } from '../porto/service.js'
-import type { PortoService } from '../porto/service.js'
+import type { PermissionPolicy, PortoService, SpendPeriod } from '../porto/service.js'
 import type { SignerService } from '../signer/service.js'
 
 type ConfigureCheckpointName = 'account' | 'agent_key'
@@ -24,23 +21,11 @@ type ConfigureCheckpoint = {
   details?: Record<string, unknown>
 }
 
-type ConfigureOptions = {
-  call?: string[]          // address[:signature] (repeatable)
-  chain?: string           // chain name or id; interactive picker shown if omitted
-  createAccount?: boolean
-  dialog?: string
-  expiry?: string          // days
-  feeLimit?: string        // human-readable decimal
-  spendLimit?: string      // ETH decimal
-  spendPeriod?: string     // 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
-  spendToken?: string      // ERC-20 token address; omit for native
-}
-
 const TOTAL_STEPS = 2
 
 // ── Chain selection ───────────────────────────────────────────────────────────
 
-async function resolveConfigureChain(options: ConfigureOptions): Promise<Chain> {
+async function resolveConfigureChain(options: { chain?: string }, isAgent: boolean): Promise<Chain> {
   if (options.chain) {
     const chain = getChainByIdOrName(options.chain)
     if (!chain) {
@@ -52,7 +37,7 @@ async function resolveConfigureChain(options: ConfigureOptions): Promise<Chain> 
     return chain
   }
 
-  if (!isInteractive()) {
+  if (isAgent) {
     throw new AppError(
       'NON_INTERACTIVE_REQUIRES_FLAGS',
       'Non-interactive configure requires --chain <name|id> (e.g. --chain base-sepolia).',
@@ -60,7 +45,6 @@ async function resolveConfigureChain(options: ConfigureOptions): Promise<Chain> 
   }
 
   // Interactive: show chain picker
-  // Group mainnets first (testnet === undefined or false), then testnets
   const mainnets = Chains.all.filter((c) => !c.testnet)
   const testnets = Chains.all.filter((c) => Boolean(c.testnet))
 
@@ -90,7 +74,7 @@ async function resolveConfigureChain(options: ConfigureOptions): Promise<Chain> 
 // ── Permission policy resolution ─────────────────────────────────────────────
 
 function parseCallArg(value: string): { to: `0x${string}`; signature?: `0x${string}` } {
-  const colonIdx = value.indexOf(':', 2) // skip 0x; addresses can't contain ':'
+  const colonIdx = value.indexOf(':', 2)
   if (colonIdx === -1) return { to: value as `0x${string}` }
   return {
     to: value.slice(0, colonIdx) as `0x${string}`,
@@ -98,31 +82,43 @@ function parseCallArg(value: string): { to: `0x${string}`; signature?: `0x${stri
   }
 }
 
-async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain): Promise<PermissionPolicy> {
+type ConfigureOptions = {
+  call?: string[]
+  chain?: string
+  createAccount?: boolean
+  dialog: string
+  expiry?: number
+  feeLimit?: number
+  spendLimit?: number
+  spendPeriod: 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+  spendToken?: string
+}
+
+async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain, isAgent: boolean): Promise<PermissionPolicy> {
   const prefillCalls = options.call?.length ? options.call.map(parseCallArg) : undefined
 
-  if (isInteractive()) {
+  if (!isAgent) {
     return promptPermissionPolicy({
       chain,
       prefill: {
         calls: prefillCalls ?? null,
-        spendLimit: options.spendLimit,
+        spendLimit: options.spendLimit?.toString(),
         spendPeriod: options.spendPeriod as SpendPeriod | undefined,
         spendToken: options.spendToken,
-        feeLimit: options.feeLimit,
-        expiryDays: options.expiry ? parseInt(options.expiry, 10) : undefined,
+        feeLimit: options.feeLimit?.toString(),
+        expiryDays: options.expiry,
       },
     })
   }
 
   // Non-interactive: require explicit flags
-  if (!options.spendLimit) {
+  if (options.spendLimit === undefined) {
     throw new AppError(
       'NON_INTERACTIVE_REQUIRES_FLAGS',
       'Non-interactive configure requires --spend-limit <amount> (e.g. --spend-limit 0.01).',
     )
   }
-  if (!options.expiry) {
+  if (options.expiry === undefined) {
     throw new AppError(
       'NON_INTERACTIVE_REQUIRES_FLAGS',
       'Non-interactive configure requires --expiry <days> (e.g. --expiry 7).',
@@ -131,11 +127,11 @@ async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain):
 
   return {
     calls: prefillCalls ?? null,
-    spendLimitWei: parseEther(options.spendLimit as `${number}`),
-    spendPeriod: (options.spendPeriod ?? 'day') as SpendPeriod,
+    spendLimitWei: parseEther(options.spendLimit.toString() as `${number}`),
+    spendPeriod: options.spendPeriod as SpendPeriod,
     ...(options.spendToken ? { spendToken: options.spendToken as `0x${string}` } : {}),
-    feeLimit: options.feeLimit as `${number}` | undefined,
-    expiryDays: parseInt(options.expiry, 10),
+    feeLimit: options.feeLimit?.toString() as `${number}` | undefined,
+    expiryDays: options.expiry,
   }
 }
 
@@ -146,8 +142,6 @@ function nextActionForError(checkpoint: ConfigureCheckpointName, error: AppError
   if (typeof hint === 'string' && hint.trim().length > 0) return hint
 
   switch (error.code) {
-    case 'CONFIGURE_HUMAN_ONLY':
-      return 'Re-run `openawa configure` without --json.'
     case 'PORTO_LOCAL_RELAY_BIND_FAILED':
       return 'Allow local loopback binding for Porto CLI relay, then re-run configure.'
     case 'MISSING_ACCOUNT_ADDRESS':
@@ -271,13 +265,11 @@ async function runAccountStep(
       permissionId = onboardResult.grantedPermission?.id
       status = hadAddress ? 'updated' : 'created'
       summary = `Account ready at ${address} on chain ${String(chainId)}.`
-
       saveConfig(config)
     } else {
       address = config.porto!.address!
       chainId = chain.id
 
-      // Only grant if no existing permission (on-chain or precall) matches what we'd grant.
       const existing = await porto.findMatchingPermission({
         address,
         policy,
@@ -309,111 +301,55 @@ async function runAccountStep(
   }
 }
 
-// ── Flow orchestration ────────────────────────────────────────────────────────
+// ── Command ───────────────────────────────────────────────────────────────────
 
-async function runConfigureFlow(
-  mode: OutputMode,
-  options: ConfigureOptions,
-  config: AgentWalletConfig,
-  porto: PortoService,
-  signer: SignerService,
-) {
-  if (mode !== 'human') {
-    throw new AppError(
-      'CONFIGURE_HUMAN_ONLY',
-      'The `configure` command supports human output only. Re-run without --json.',
-    )
-  }
+export const configureCommand = Cli.create('configure', {
+  description: 'One-shot account setup: signer key, account, and default permissions',
+  vars: varsSchema,
+  options: z.object({
+    chain: z.string().optional().describe('Chain name or ID (interactive picker if omitted)'),
+    dialog: z.string().default('id.porto.sh').describe('Dialog host for Porto grant UI'),
+    createAccount: z.boolean().optional().describe('Force creation of a new account'),
+    call: z.array(z.string()).optional().describe('Allowed call: address[:signature] (repeatable)'),
+    spendLimit: z.number().optional().describe('Spend limit as a decimal (ETH or --spend-token units)'),
+    spendPeriod: z.enum(['minute', 'hour', 'day', 'week', 'month', 'year']).default('day').describe('Spend period'),
+    expiry: z.number().int().optional().describe('Permission validity in days'),
+    spendToken: Address.optional().describe('ERC-20 token address (default: native ETH)'),
+    feeLimit: z.number().optional().describe('Fee cap per period'),
+  }),
+  alias: { chain: 'c' } as const,
+  examples: [
+    { description: 'Interactive setup' },
+    { options: { chain: 'base-sepolia', spendLimit: 0.01, expiry: 7 }, description: 'Non-interactive' },
+    { options: { chain: 'base', call: ['0xA0b8…eB48', '0xdead…beef'], spendLimit: 0.01, expiry: 7 }, description: 'Multiple allowed contracts' },
+    { options: { chain: 'base', call: ['0xA0b8…eB48:transfer(address,uint256)'], spendLimit: 0.01, expiry: 7 }, description: 'Allowlist with function selector' },
+    { options: { chain: 'base', spendToken: '0xA0b8…eB48', spendLimit: 100, expiry: 30 }, description: 'ERC-20 spend limit' },
+  ],
+  async run(c) {
+    const { config, porto, signer } = c.var
 
-  process.stderr.write('Configure wallet (local-admin setup)\nPowered by Porto\n\n')
+    process.stderr.write('Configure wallet (local-admin setup)\nPowered by Porto\n\n')
 
-  const agentKeyCheckpoint = await runAgentKeyStep(signer, config)
-  const chain = await resolveConfigureChain(options)
-  const policy = await resolvePermissionPolicy(options, chain)
-  const accountResult = await runAccountStep(porto, config, options, chain, policy)
+    const agentKeyCheckpoint = await runAgentKeyStep(signer, config)
+    const chain = await resolveConfigureChain(c.options, c.agent)
+    const policy = await resolvePermissionPolicy(c.options, chain, c.agent)
+    const accountResult = await runAccountStep(porto, config, c.options, chain, policy)
 
-  return {
-    account: { address: accountResult.address, chainId: accountResult.chainId ?? config.porto?.chainIds?.[0] },
-    activation: {
-      state: 'granted',
-      ...(accountResult.permissionId ? { permissionId: accountResult.permissionId } : {}),
-    },
-    checkpoints: [agentKeyCheckpoint, accountResult.checkpoint],
-    command: 'configure',
-    poweredBy: 'Porto',
-    setupMode: 'local-admin',
-  }
-}
+    const result = {
+      account: { address: accountResult.address, chainId: accountResult.chainId ?? config.porto?.chainIds?.[0] },
+      checkpoints: [agentKeyCheckpoint, accountResult.checkpoint],
+      command: 'configure',
+      poweredBy: 'Porto',
+      setupMode: 'local-admin',
+    }
 
-// ── Human renderer ────────────────────────────────────────────────────────────
-
-function renderHuman({ payload }: { payload: Record<string, unknown> }) {
-  const checkpoints = Array.isArray(payload.checkpoints)
-    ? (payload.checkpoints as Array<Record<string, unknown>>)
-    : []
-
-  const lines = ['Configure complete', 'Checkpoints:']
-  for (const cp of checkpoints) {
-    lines.push(`- ${String(cp.checkpoint ?? 'unknown')}: ${String(cp.status ?? 'unknown')}`)
-  }
-
-  const account = payload.account as { address?: string; chainId?: number } | undefined
-  const activation = payload.activation as { permissionId?: string } | undefined
-
-  lines.push(`Account: ${account?.address ?? 'not configured'}`)
-  if (account?.chainId) lines.push(`Chain ID: ${account.chainId}`)
-  if (activation?.permissionId) lines.push(`Permission ID: ${activation.permissionId}`)
-
-  return lines.join('\n')
-}
-
-// ── Command registration ──────────────────────────────────────────────────────
-
-export function registerConfigureCommand(
-  program: Command,
-  deps: { config: AgentWalletConfig; porto: PortoService; signer: SignerService },
-) {
-  const { config, porto, signer } = deps
-
-  const cmd = program
-    .command('configure')
-    .description('Configure local-admin account, signer key, and default permissions')
-    .option('--chain <name|id>', 'Chain name or ID (e.g. base-sepolia, 84532); interactive picker shown if omitted')
-    .option('--dialog <hostname>', 'Dialog host', 'id.porto.sh')
-    .option('--create-account', 'Force creation of a new account')
-    .option(
-      '--call <address[:signature]>',
-      'Allowed call: address with optional :functionSignature (repeatable; omit to allow any)',
-      (val: string, prev: string[]) => [...prev, val],
-      [] as string[],
-    )
-    .option('--spend-limit <amount>', 'Spend limit as a decimal (native ETH or --spend-token units; required when non-interactive)')
-    .option('--spend-period <period>', 'Spend period: minute|hour|day|week|month|year (default: day)')
-    .option('--expiry <days>', 'Permission validity in days (required when non-interactive)')
-    .option('--spend-token <address>', 'ERC-20 token address for spend limit (default: native ETH)')
-    .option('--fee-limit <amount>', 'Fee cap per period; default: 25 EXP on Base Sepolia / 0.01 native on other chains')
-
-  cmd.addHelpText('after', `
-Examples:
-  # Interactive (TTY): prompts for chain and all options
-  $ openawa configure
-
-  # Non-interactive: Base Sepolia, any contract, 0.01 ETH/day, 7-day expiry
-  $ openawa configure --chain base-sepolia --spend-limit 0.01 --spend-period day --expiry 7
-
-  # Allowlist a specific contract address on Base mainnet
-  $ openawa configure --chain base --call 0xA0b8…eB48 --spend-limit 0.01 --expiry 7
-
-  # Allowlist with a specific function selector
-  $ openawa configure --chain base --call 0xA0b8…eB48:transfer(address,uint256) --spend-limit 0.01 --expiry 7
-
-  # Multiple allowed contracts
-  $ openawa configure --chain base --call 0xA0b8…eB48 --call 0xdead…beef --spend-limit 0.01 --expiry 7
-
-  # ERC-20 spend token with custom fee cap (Base Sepolia testnet)
-  $ openawa configure --chain base-sepolia --spend-token 0xfca4…c64e --spend-limit 100 --expiry 30 --fee-limit 25`)
-
-  cmd.action((options: ConfigureOptions) =>
-    runCommandAction(cmd, 'human', (mode) => runConfigureFlow(mode, options, config, porto, signer), renderHuman),
-  )
-}
+    return c.ok(result, {
+      cta: {
+        commands: [
+          { command: 'status', description: 'Inspect the new account' },
+          { command: 'sign', description: 'Submit your first transaction' },
+        ],
+      },
+    })
+  },
+})

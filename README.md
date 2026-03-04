@@ -42,12 +42,24 @@ Porto should remain visible as "powered by Porto", but not drive primary command
 - Account selection should use `--account <address-or-alias>`.
 - Alias + default account support should be added in config model.
 
-## Output Strategy (MVP)
-- Global flags: `--json` and `--human`.
-- `configure`: human-only interactive flow.
-- `sign`: JSON-first.
-- `status`: human-first by default, JSON available.
-- Commands should use one logic path and separate renderers (machine output must stay clean on stdout in JSON mode).
+## Output
+
+- Default format: **TOON** (token-efficient key-value; human-readable in terminal)
+- Use `--format json|yaml|md|jsonl` or `--json` to override on any command
+- `configure`: interactive on a TTY; structured output available to agents via `--json`
+- `sign`: TOON default, JSON recommended for agents
+- `status`: TOON default, JSON available
+
+## Agent Discovery
+
+openawa is an [incur](https://github.com/wevm/incur) CLI — agents can discover and consume it
+without manual configuration:
+
+```sh
+openawa skills add  # sync skill files into your agent's context (recommended)
+openawa mcp add     # register as an MCP server
+openawa --llms      # print machine-readable command manifest
+```
 
 ## Design Principles
 - Security-first defaults

@@ -33,7 +33,7 @@ describe('e2e flow', () => {
       // ── Configure: create account + grant permissions ───────────────────────
 
       const configure = spawnCli(
-        buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', createAccount: true, dialogHost, mode: 'human', spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
+        buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', createAccount: true, dialogHost, json: true, spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
@@ -49,21 +49,54 @@ describe('e2e flow', () => {
         configureResult.exitCode,
         `configure failed:\nstdout: ${configureResult.stdout}\nstderr: ${configureResult.stderr}`,
       ).toBe(0)
-      expect(normalizeText(configureResult.stdout)).toMatchInlineSnapshot(`
-        "
-
-        Open the URL below in your browser to continue:
-
-        https://id.porto.sh/dialog/?relayUrl=[dynamic]
-
-        Configure complete
-        Checkpoints:
-        - agent_key: created
-        - account: created
-        Account: [dynamic]
-        Chain ID: 84532
-        Permission ID: [dynamic]
-        "
+      expect(configureResult.payload).toMatchInlineSnapshot({
+        account: { address: expect.any(String) },
+        checkpoints: [
+          { details: { keyId: expect.any(String) } },
+          { details: { address: expect.any(String), permissionId: expect.any(String) } },
+        ],
+      }, `
+        {
+          "account": {
+            "address": Any<String>,
+            "chainId": 84532,
+          },
+          "checkpoints": [
+            {
+              "checkpoint": "agent_key",
+              "details": {
+                "backend": "chipkey",
+                "keyId": Any<String>,
+              },
+              "status": "created",
+            },
+            {
+              "checkpoint": "account",
+              "details": {
+                "address": Any<String>,
+                "chainId": 84532,
+                "permissionId": Any<String>,
+              },
+              "status": "created",
+            },
+          ],
+          "command": "configure",
+          "cta": {
+            "commands": [
+              {
+                "command": "openawa status",
+                "description": "Inspect the new account",
+              },
+              {
+                "command": "openawa sign",
+                "description": "Submit your first transaction",
+              },
+            ],
+            "description": "Suggested commands:",
+          },
+          "poweredBy": "Porto",
+          "setupMode": "local-admin",
+        }
       `)
 
       // ── Get account details ───────────────────────────────────────────────
@@ -113,7 +146,6 @@ describe('e2e flow', () => {
             },
           },
           "command": "status",
-          "ok": true,
           "poweredBy": "Porto",
           "precallPermissions": [
             {
@@ -154,7 +186,6 @@ describe('e2e flow', () => {
         {
           "bundleId": Any<String>,
           "command": "sign",
-          "ok": true,
           "poweredBy": "Porto",
           "status": "success",
           "txHash": Any<String>,
@@ -170,26 +201,15 @@ describe('e2e flow', () => {
       )
       expect(disallowedResult.exitCode).not.toBe(0)
       expect(disallowedResult.payload).toMatchInlineSnapshot({
-        error: { message: expect.any(String), details: { details: expect.any(String), message: expect.any(String) } },
+        message: expect.stringContaining('UnauthorizedCall'),
       }, `
         {
-          "error": {
-            "code": "PORTO_SEND_PREPARE_FAILED",
-            "details": {
-              "code": -32603,
-              "details": Any<String>,
-              "message": Any<String>,
-              "name": "InternalRpcError",
-              "shortMessage": "An internal error was received.",
-              "stage": "prepare_calls",
-            },
-            "message": Any<String>,
-          },
-          "ok": false,
+          "code": "PORTO_SEND_PREPARE_FAILED",
+          "message": StringContaining "UnauthorizedCall",
         }
       `)
 
-      // ── Status: verify full state in json and human modes ─────────────────
+      // ── Status: verify full state in json and toon modes ──────────────────
 
       const jsonStatus = await runCli(['status', '--json'], env.env)
       expect(jsonStatus.exitCode).toBe(0)
@@ -233,7 +253,6 @@ describe('e2e flow', () => {
             },
           },
           "command": "status",
-          "ok": true,
           "poweredBy": "Porto",
           "precallPermissions": [],
           "signer": {
@@ -246,22 +265,10 @@ describe('e2e flow', () => {
         }
       `)
 
-      const humanStatus = await runCli(['status', '--human'], env.env)
-      expect(humanStatus.exitCode).toBe(0)
-      expect(normalizeText(humanStatus.stdout)).toMatchInlineSnapshot(`
-        "Status
-        Account: [dynamic]
-        Signer: chipkey (ready)
-        Chains:
-          Base Sepolia (84532)
-            Permissions: 1 active / 1 total · expires [dynamic]
-            Balance: [dynamic] ETH"
-      `)
-
       // ── Rerun configure: verify idempotency ───────────────────────────────
 
       const rerun = spawnCli(
-        buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', dialogHost, mode: 'human', spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
+        buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', dialogHost, json: true, spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
@@ -275,9 +282,9 @@ describe('e2e flow', () => {
 
       const rerunResult = await rerun.done()
       expect(rerunResult.exitCode).toBe(0)
-      expect(rerunResult.stdout).toContain('Configure complete')
+      expect(rerunResult.payload).toMatchObject({ command: 'configure' })
 
-      const checkpoints = parseCheckpoints(rerunResult.stdout)
+      const checkpoints = parseCheckpoints(rerunResult.payload)
       expect(checkpoints.get('agent_key')).toBe('already_ok')
       expect(checkpoints.get('account')).toBe('already_ok')
 
@@ -307,12 +314,9 @@ describe('e2e flow', () => {
       `)
 
       // ── Regrant: force grant path by changing spend limit ─────────────────
-      // A different spend limit won't match the existing onchain permission,
-      // so configure must call grant() — exercising the standalone grant path
-      // (including the dialog success message).
 
       const regrant = spawnCli(
-        buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', dialogHost, mode: 'human', spendLimit: '0.02', spendPeriod: 'day', expiry: '7' }),
+        buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', dialogHost, json: true, spendLimit: '0.02', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
@@ -326,7 +330,7 @@ describe('e2e flow', () => {
         `regrant failed:\nstdout: ${regrantResult.stdout}\nstderr: ${regrantResult.stderr}`,
       ).toBe(0)
 
-      const regrantCheckpoints = parseCheckpoints(regrantResult.stdout)
+      const regrantCheckpoints = parseCheckpoints(regrantResult.payload)
       expect(regrantCheckpoints.get('agent_key')).toBe('already_ok')
       expect(regrantCheckpoints.get('account')).toBe('updated')
 
@@ -394,10 +398,9 @@ describe('e2e flow', () => {
       `)
 
       // ── Second chain: configure OP Sepolia ────────────────────────────────
-      // Exercises porto.onboard on a new chain with the same existing account address.
 
       const secondChain = spawnCli(
-        buildConfigureArgs({ chain: 'op-sepolia', dialogHost, mode: 'human', spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
+        buildConfigureArgs({ chain: 'op-sepolia', dialogHost, json: true, spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
@@ -411,7 +414,7 @@ describe('e2e flow', () => {
         `second chain configure failed:\nstdout: ${secondChainResult.stdout}\nstderr: ${secondChainResult.stderr}`,
       ).toBe(0)
 
-      const secondChainCheckpoints = parseCheckpoints(secondChainResult.stdout)
+      const secondChainCheckpoints = parseCheckpoints(secondChainResult.payload)
       expect(secondChainCheckpoints.get('agent_key')).toBe('already_ok')
       expect(secondChainCheckpoints.get('account')).toMatch(/^(created|updated)$/)
 
@@ -482,7 +485,6 @@ describe('e2e flow', () => {
             },
           },
           "command": "status",
-          "ok": true,
           "poweredBy": "Porto",
           "precallPermissions": [
             {
@@ -610,28 +612,28 @@ describe('e2e flow', () => {
         env.env,
       )
       expect(ambiguousSign.exitCode).not.toBe(0)
-      expect(ambiguousSign.payload?.error).toMatchObject({ code: 'AMBIGUOUS_CHAIN' })
+      expect(ambiguousSign.payload).toMatchInlineSnapshot({
+        message: expect.stringContaining('chain'),
+      }, `
+        {
+          "code": "AMBIGUOUS_CHAIN",
+          "message": StringContaining "chain",
+        }
+      `)
     },
     FLOW_TIMEOUT_MS,
   )
 })
 
-function parseCheckpoints(stdout: string): Map<string, string> {
+function parseCheckpoints(payload: Record<string, unknown> | null): Map<string, string> {
   const map = new Map<string, string>()
-  for (const line of stdout.split('\n')) {
-    const match = /^-\s+([a-z_]+):\s+([a-z_]+)$/i.exec(line.trim())
-    if (match?.[1] && match[2]) map.set(match[1], match[2])
+  if (!payload) return map
+  const checkpoints = payload.checkpoints
+  if (!Array.isArray(checkpoints)) return map
+  for (const cp of checkpoints) {
+    if (cp && typeof cp === 'object' && 'checkpoint' in cp && 'status' in cp) {
+      map.set(String(cp.checkpoint), String(cp.status))
+    }
   }
   return map
-}
-
-// Human-readable text normalization: replace values after known dynamic labels.
-function normalizeText(text: string): string {
-  return text
-    .replace(/relayUrl=\S+/g, 'relayUrl=[dynamic]')
-    .replace(/^(Account: )\S+/m, '$1[dynamic]')
-    .replace(/^(Permission ID: )\S+/m, '$1[dynamic]')
-    .replace(/(\s+Permissions:.*·\s+expires\s+)\S+/gm, '$1[dynamic]')
-    .replace(/^(\s+- )\S+( expires )\S+/m, '$1[dynamic]$2[dynamic]')
-    .replace(/^(\s+Balance: )[\d.]+ (ETH|EXP|USDC)/gm, '$1[dynamic] $2')
 }

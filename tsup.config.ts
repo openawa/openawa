@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/openawa.ts'],
+  entry: ['src/cli.ts'],
   format: ['esm'],
   target: 'node22',
   sourcemap: true,

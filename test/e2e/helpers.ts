@@ -66,10 +66,10 @@ export async function runCli(
   timeoutMs = 120_000,
 ): Promise<CliRunResult> {
   if (DEBUG) {
-    console.error(`[e2e][runCli] node dist/openawa.js ${args.join(' ')}`)
+    console.error(`[e2e][runCli] node dist/cli.js ${args.join(' ')}`)
   }
 
-  const result = await execa('node', ['dist/openawa.js', ...args], {
+  const result = await execa('node', ['dist/cli.js', ...args], {
     env,
     reject: false,
     timeout: timeoutMs,
@@ -110,10 +110,10 @@ export async function readAgentWalletConfig(configHome: string): Promise<AgentWa
  */
 export function spawnCli(args: string[], env: NodeJS.ProcessEnv): CliHandle {
   if (DEBUG) {
-    console.error(`[e2e][spawnCli] node dist/openawa.js ${args.join(' ')}`)
+    console.error(`[e2e][spawnCli] node dist/cli.js ${args.join(' ')}`)
   }
 
-  const child = spawn('node', ['dist/openawa.js', ...args], {
+  const child = spawn('node', ['dist/cli.js', ...args], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -292,14 +292,15 @@ export function buildConfigureArgs(parameters: {
   createAccount?: boolean
   dialogHost?: string
   expiry?: string
-  mode: 'human' | 'json'
+  json?: boolean           // pass --json flag (default: false, uses TOON)
   spendLimit?: string
   spendPeriod?: string
 }): string[] {
-  const { calls, chain, createAccount, dialogHost, expiry, mode, spendLimit, spendPeriod } = parameters
+  const { calls, chain, createAccount, dialogHost, expiry, json, spendLimit, spendPeriod } = parameters
 
-  const args = ['configure', `--${mode}`, '--chain', chain]
+  const args = ['configure', '--chain', chain]
 
+  if (json) args.push('--json')
   for (const call of calls ?? []) args.push('--call', call)
   if (createAccount) args.push('--create-account')
   if (dialogHost) args.push('--dialog', dialogHost)
@@ -395,9 +396,18 @@ async function waitForProcessExit(
 
 function parseJsonPayload(output: string): Record<string, unknown> | null {
   if (!output) return null
-  try {
-    return JSON.parse(output) as Record<string, unknown>
-  } catch {
-    return null
+  // incur writes pretty-printed JSON as the last block; find the last line
+  // starting with { or [ and parse from there to end of output.
+  const lines = output.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i]!.trim()
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return JSON.parse(lines.slice(i).join('\n')) as Record<string, unknown>
+      } catch {
+        // continue searching upward
+      }
+    }
   }
+  return null
 }
