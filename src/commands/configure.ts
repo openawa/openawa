@@ -318,6 +318,17 @@ export const configureCommand = Cli.create('configure', {
     feeLimit: z.number().optional().describe('Fee cap per period'),
   }),
   alias: { chain: 'c' } as const,
+  output: z.object({
+    account: z.object({ address: z.string(), chainId: z.number().optional() }),
+    checkpoints: z.array(z.object({
+      checkpoint: z.enum(['account', 'agent_key']),
+      status: z.enum(['already_ok', 'created', 'updated', 'skipped', 'failed']),
+      details: z.record(z.string(), z.unknown()).optional(),
+    })),
+    command: z.literal('configure'),
+    poweredBy: z.string(),
+    setupMode: z.literal('local-admin'),
+  }),
   examples: [
     { description: 'Interactive setup' },
     { options: { chain: 'base-sepolia', spendLimit: 0.01, expiry: 7 }, description: 'Non-interactive' },
@@ -338,9 +349,9 @@ export const configureCommand = Cli.create('configure', {
     const result = {
       account: { address: accountResult.address, chainId: accountResult.chainId ?? config.porto?.chainIds?.[0] },
       checkpoints: [agentKeyCheckpoint, accountResult.checkpoint],
-      command: 'configure',
+      command: 'configure' as const,
       poweredBy: 'Porto',
-      setupMode: 'local-admin',
+      setupMode: 'local-admin' as const,
     }
 
     return c.ok(result, {

@@ -13,6 +13,34 @@ export const statusCommand = Cli.create('status', {
     chain: z.string().optional().describe('Filter to a specific chain'),
   }),
   alias: { chain: 'c' } as const,
+  output: z.object({
+    command: z.literal('status'),
+    poweredBy: z.string(),
+    account: z.object({ address: z.string().nullable() }),
+    signer: z.object({
+      keyId: z.string().optional(),
+      backend: z.string(),
+      curve: z.literal('p256'),
+      exists: z.boolean(),
+    }),
+    activation: z.object({ state: z.enum(['active_onchain', 'precall_pending', 'unconfigured']) }),
+    chains: z.record(z.string(), z.object({
+      chainName: z.string(),
+      permissions: z.object({
+        active: z.number(),
+        total: z.number(),
+        latestExpiry: z.string().nullable(),
+      }),
+      balance: z.object({ formatted: z.string(), symbol: z.string() }).nullable(),
+      warnings: z.array(z.object({ code: z.string(), message: z.string() })),
+    })),
+    precallPermissions: z.array(z.object({
+      id: z.string(),
+      chainId: z.number(),
+      expiry: z.string(),
+    })),
+    warnings: z.array(z.object({ code: z.string(), message: z.string() })),
+  }),
   async run(c) {
     const { config, porto, signer } = c.var
     const address = (c.options.address ?? config.porto?.address) as `0x${string}` | undefined
@@ -76,16 +104,16 @@ export const statusCommand = Cli.create('status', {
       .map((pp) => ({ id: pp.id, chainId: pp.chainId, expiry: new Date(pp.expiry * 1000).toISOString() }))
 
     const totalActive = Object.values(chainsData).reduce((sum, c) => sum + c.permissions.active, 0)
-    const activationState =
+    const activationState: 'active_onchain' | 'precall_pending' | 'unconfigured' =
       totalActive > 0 ? 'active_onchain' :
       precallPermissions.length > 0 ? 'precall_pending' :
       'unconfigured'
 
     return {
-      command: 'status',
+      command: 'status' as const,
       poweredBy: 'Porto',
       account: { address: address ?? null },
-      signer: signerInfo,
+      signer: signerInfo as { keyId?: string; backend: string; curve: 'p256'; exists: boolean },
       activation: { state: activationState },
       chains: chainsData,
       precallPermissions,
