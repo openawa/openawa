@@ -13,7 +13,7 @@ const P256_SPKI_PREFIX =
   '3059301306072a8648ce3d020106082a8648ce3d030107034200'
 
 const KEY_NOT_INITIALIZED_MESSAGE =
-  'Signer key has not been initialized. Run `agent-wallet configure` first.'
+  'Signer key has not been initialized. Run `openawa configure` first.'
 
 
 function decodePayload(payload: string, format: PayloadFormat): Uint8Array {
@@ -89,7 +89,7 @@ export class SignerService {
       }
     }
 
-    const newKeyId = `agent-wallet:${crypto.randomUUID()}`
+    const newKeyId = `openawa:${crypto.randomUUID()}`
     await this.#backend.create(newKeyId, { label: options.label })
     this.config.signer.keyId = newKeyId
 

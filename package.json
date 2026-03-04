@@ -1,14 +1,14 @@
 {
-  "name": "agent-wallet",
+  "name": "@openawa/cli",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "agent-wallet": "dist/agent-wallet.js"
+    "openawa": "dist/openawa.js"
   },
   "scripts": {
     "build": "tsup",
-    "dev": "tsx src/agent-wallet.ts",
+    "dev": "tsx src/openawa.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit",
     "test:e2e": "npm run build && vitest run --project e2e",

@@ -3,7 +3,7 @@
 This folder contains manual research/debug scripts used during product and security investigation.
 
 Scope:
-- these scripts are not part of the `agent-wallet` CLI runtime
+- these scripts are not part of the `openawa` CLI runtime
 - these scripts are not part of CI assertions
 - script behavior may be intentionally verbose and exploratory
 

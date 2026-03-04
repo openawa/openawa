@@ -57,7 +57,7 @@ function getConfigRoot() {
 }
 
 export function getConfigDirectory() {
-  return path.join(getConfigRoot(), 'agent-wallet')
+  return path.join(getConfigRoot(), 'openawa')
 }
 
 export function getConfigPath() {

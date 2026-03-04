@@ -1,7 +1,7 @@
 # CLI Spec (v0.3)
 
 ## Product Direction
-`agent-wallet` is a security-first wallet CLI for autonomous agents.
+`openawa` is a security-first wallet CLI for autonomous agents.
 
 Primary user promise:
 - Give an agent a wallet that can act autonomously with tight, inspectable policy boundaries.
@@ -58,7 +58,7 @@ flowchart LR
 ## Canonical UX (Target)
 Three user-facing commands:
 
-### 1. `agent-wallet configure`
+### 1. `openawa configure`
 Configures one account end-to-end for a single chain per run:
 - create or reuse account
 - initialize/reuse local agent signing key
@@ -117,7 +117,7 @@ Each step prints:
 Active permissions are resolved from Relay key state (`wallet_getKeys`).
 Locally persisted `permissionIds` are a cache only.
 
-### 2. `agent-wallet sign`
+### 2. `openawa sign`
 Agent execution/signing command.
 
 For MVP this is call-bundle oriented:
@@ -134,7 +134,7 @@ For MVP this is call-bundle oriented:
 
 Advanced/raw signing is out of scope for MVP.
 
-### 3. `agent-wallet status`
+### 3. `openawa status`
 Inspection command.
 
 Should include:
@@ -245,9 +245,9 @@ Notes:
 
 ## Current Implementation Note
 Current codebase now exposes the top-level command surface:
-- `agent-wallet configure`
-- `agent-wallet sign`
-- `agent-wallet status`
+- `openawa configure`
+- `openawa sign`
+- `openawa status`
 
 Porto remains an internal adapter and is not exposed as a dedicated CLI command group.
 

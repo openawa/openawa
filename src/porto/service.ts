@@ -152,14 +152,14 @@ export function resolveCommandChain(config: AgentWalletConfig, chainFlag?: strin
         .map((id) => Chains.all.find((c) => c.id === id)?.name.toLowerCase().replace(/[\s-]+/g, '-') ?? String(id))
       throw new AppError(
         'CHAIN_NOT_CONFIGURED',
-        `Chain "${chainFlag}" is not configured. Run \`agent-wallet configure --chain ${chainFlag}\` first.\nConfigured: ${knownNames.join(', ')}`,
+        `Chain "${chainFlag}" is not configured. Run \`openawa configure --chain ${chainFlag}\` first.\nConfigured: ${knownNames.join(', ')}`,
       )
     }
     return chain
   }
 
   if (chainIds.length === 0) {
-    throw new AppError('MISSING_CHAIN_ID', 'No chain configured. Run `agent-wallet configure --chain <name>` first.')
+    throw new AppError('MISSING_CHAIN_ID', 'No chain configured. Run `openawa configure --chain <name>` first.')
   }
 
   if (chainIds.length === 1) {
@@ -606,7 +606,7 @@ export class PortoService {
   }): Promise<AgentPermissionSnapshot[]> {
     const address = options.address ?? this.config.porto?.address
     if (!address) {
-      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `agent-wallet configure` first.')
+      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `openawa configure` first.')
     }
 
     const chain = resolveConfiguredChain(this.config, options.chainId)
@@ -913,7 +913,7 @@ export class PortoService {
     try {
       const address = options.address ?? this.config.porto?.address
       if (!address) {
-        throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `agent-wallet configure` first.')
+        throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `openawa configure` first.')
       }
 
       await WalletActions.connect(session.client, {
@@ -1096,7 +1096,7 @@ export class PortoService {
   async balance(options: { address?: `0x${string}`; chainId?: number }) {
     const address = options.address ?? this.config.porto?.address
     if (!address) {
-      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `agent-wallet configure` first.')
+      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `openawa configure` first.')
     }
 
     const chain = resolveConfiguredChain(this.config, options.chainId)
@@ -1131,7 +1131,7 @@ export class PortoService {
   async deployment(options: { address?: `0x${string}`; chainId?: number }) {
     const address = options.address ?? this.config.porto?.address
     if (!address) {
-      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `agent-wallet configure` first.')
+      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `openawa configure` first.')
     }
 
     const chain = resolveConfiguredChain(this.config, options.chainId)

@@ -147,7 +147,7 @@ function nextActionForError(checkpoint: ConfigureCheckpointName, error: AppError
 
   switch (error.code) {
     case 'CONFIGURE_HUMAN_ONLY':
-      return 'Re-run `agent-wallet configure` without --json.'
+      return 'Re-run `openawa configure` without --json.'
     case 'PORTO_LOCAL_RELAY_BIND_FAILED':
       return 'Allow local loopback binding for Porto CLI relay, then re-run configure.'
     case 'MISSING_ACCOUNT_ADDRESS':
@@ -160,7 +160,7 @@ function nextActionForError(checkpoint: ConfigureCheckpointName, error: AppError
       if (checkpoint === 'account') {
         return 'Retry configure and complete the account and permission dialog if prompted.'
       }
-      return 'Fix the issue above, then re-run `agent-wallet configure`.'
+      return 'Fix the issue above, then re-run `openawa configure`.'
   }
 }
 
@@ -396,22 +396,22 @@ export function registerConfigureCommand(
   cmd.addHelpText('after', `
 Examples:
   # Interactive (TTY): prompts for chain and all options
-  $ agent-wallet configure
+  $ openawa configure
 
   # Non-interactive: Base Sepolia, any contract, 0.01 ETH/day, 7-day expiry
-  $ agent-wallet configure --chain base-sepolia --spend-limit 0.01 --spend-period day --expiry 7
+  $ openawa configure --chain base-sepolia --spend-limit 0.01 --spend-period day --expiry 7
 
   # Allowlist a specific contract address on Base mainnet
-  $ agent-wallet configure --chain base --call 0xA0b8…eB48 --spend-limit 0.01 --expiry 7
+  $ openawa configure --chain base --call 0xA0b8…eB48 --spend-limit 0.01 --expiry 7
 
   # Allowlist with a specific function selector
-  $ agent-wallet configure --chain base --call 0xA0b8…eB48:transfer(address,uint256) --spend-limit 0.01 --expiry 7
+  $ openawa configure --chain base --call 0xA0b8…eB48:transfer(address,uint256) --spend-limit 0.01 --expiry 7
 
   # Multiple allowed contracts
-  $ agent-wallet configure --chain base --call 0xA0b8…eB48 --call 0xdead…beef --spend-limit 0.01 --expiry 7
+  $ openawa configure --chain base --call 0xA0b8…eB48 --call 0xdead…beef --spend-limit 0.01 --expiry 7
 
   # ERC-20 spend token with custom fee cap (Base Sepolia testnet)
-  $ agent-wallet configure --chain base-sepolia --spend-token 0xfca4…c64e --spend-limit 100 --expiry 30 --fee-limit 25`)
+  $ openawa configure --chain base-sepolia --spend-token 0xfca4…c64e --spend-limit 100 --expiry 30 --fee-limit 25`)
 
   cmd.action((options: ConfigureOptions) =>
     runCommandAction(cmd, 'human', (mode) => runConfigureFlow(mode, options, config, porto, signer), renderHuman),

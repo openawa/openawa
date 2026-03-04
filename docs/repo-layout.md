@@ -1,7 +1,7 @@
 # Repo Layout (single package)
 
 ```
-agent-wallet/
+openawa/
   README.md
   package.json
   tsconfig.json
@@ -10,7 +10,7 @@ agent-wallet/
     cli-spec.md
     repo-layout.md
   src/
-    agent-wallet.ts
+    openawa.ts
     porto-wallet.ts
     cli.ts
     lib/

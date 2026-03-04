@@ -15,7 +15,7 @@ export async function runAgentWallet(argv: string[] = process.argv) {
 
   const program = new Command()
   program
-    .name('agent-wallet')
+    .name('openawa')
     .description('Security-first agent wallet CLI (powered by Porto)')
     .showHelpAfterError(true)
     .option('--json', 'Machine-readable JSON output')

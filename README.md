@@ -22,9 +22,9 @@ Security note:
 
 ## CLI Surface
 Top-level commands:
-1. `agent-wallet configure`
-2. `agent-wallet sign`
-3. `agent-wallet status`
+1. `openawa configure`
+2. `openawa sign`
+3. `openawa status`
 
 Rationale:
 - `configure`: one-shot account setup (create/reuse account + authorize local agent key + apply default policy envelope).
@@ -102,13 +102,13 @@ npm run build
 
 Current command surface:
 ```bash
-node dist/agent-wallet.js configure --calls '[{"to":"0xabc..."}]' --testnet
-node dist/agent-wallet.js sign --calls '[{"to":"0xabc...","data":"0x","value":"0x0"}]'
-node dist/agent-wallet.js status --human
+node dist/openawa.js configure --calls '[{"to":"0xabc..."}]' --testnet
+node dist/openawa.js sign --calls '[{"to":"0xabc...","data":"0x","value":"0x0"}]'
+node dist/openawa.js status --human
 ```
 
 Spec source of truth:
-- `/Users/jean/src/github.com/jeanregisser/agent-wallet/docs/cli-spec.md`
+- `/Users/jean/src/github.com/jeanregisser/openawa/docs/cli-spec.md`
 
 ## Known Issues
 
@@ -120,7 +120,7 @@ When an account is configured on multiple chains, `status` may briefly show inco
 
 **Scope**: Only affects the window between `configure` and the first on-chain transaction on each chain. Once a chain has a committed transaction, keys are read from on-chain and the stale data is never consulted.
 
-**Mitigation**: A fix has been authored in the relay ([`CreatableAccount` chain_id scoping](docs/work-tracker.md#known-upstream-issues)) but is not yet merged upstream. The agent-wallet code is written to be correct once the relay fix lands — `findGrantedPermission` does not fall back across chains.
+**Mitigation**: A fix has been authored in the relay ([`CreatableAccount` chain_id scoping](docs/work-tracker.md#known-upstream-issues)) but is not yet merged upstream. The openawa code is written to be correct once the relay fix lands — `findGrantedPermission` does not fall back across chains.
 
 ## Near-Term Priorities
 - Move signer handle persistence into keychain.

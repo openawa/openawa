@@ -18,7 +18,7 @@ Onboard a Porto account and prepare permissions setup.
 
 Command:
 ```bash
-agent-wallet porto onboard --testnet --headless
+openawa porto onboard --testnet --headless
 ```
 
 ### `agent_wallet_grant_permissions`
@@ -26,7 +26,7 @@ Grant scoped permissions (expiry, spend limits, allowlists) to the agent key.
 
 Command:
 ```bash
-agent-wallet porto grant --defaults --expiry 2026-12-31T00:00:00Z --calls '[{"to":"0xabc..."}]'
+openawa porto grant --defaults --expiry 2026-12-31T00:00:00Z --calls '[{"to":"0xabc..."}]'
 ```
 
 ### `agent_wallet_send_calls`
@@ -34,7 +34,7 @@ Send calls through Porto relay within the granted permissions.
 
 Command:
 ```bash
-agent-wallet porto send --calls '[{"to":"0xabc...","data":"0x","value":"0x0"}]'
+openawa porto send --calls '[{"to":"0xabc...","data":"0x","value":"0x0"}]'
 ```
 
 ### `agent_wallet_permissions`
@@ -42,7 +42,7 @@ List active permissions and expiry.
 
 Command:
 ```bash
-agent-wallet porto permissions
+openawa porto permissions
 ```
 
 Optional shortcut:

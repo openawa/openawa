@@ -50,7 +50,7 @@ const BROWSER_HEADLESS =
     : true
 
 export async function makeIsolatedEnv(): Promise<IsolatedEnv> {
-  const configHome = await mkdtemp(path.join(os.tmpdir(), 'agent-wallet-e2e-'))
+  const configHome = await mkdtemp(path.join(os.tmpdir(), 'openawa-e2e-'))
   return {
     configHome,
     env: {
@@ -66,10 +66,10 @@ export async function runCli(
   timeoutMs = 120_000,
 ): Promise<CliRunResult> {
   if (DEBUG) {
-    console.error(`[e2e][runCli] node dist/agent-wallet.js ${args.join(' ')}`)
+    console.error(`[e2e][runCli] node dist/openawa.js ${args.join(' ')}`)
   }
 
-  const result = await execa('node', ['dist/agent-wallet.js', ...args], {
+  const result = await execa('node', ['dist/openawa.js', ...args], {
     env,
     reject: false,
     timeout: timeoutMs,
@@ -99,7 +99,7 @@ export function getLiveNetwork(): 'prod' | 'testnet' {
 }
 
 export async function readAgentWalletConfig(configHome: string): Promise<AgentWalletConfig> {
-  const configPath = path.join(configHome, 'agent-wallet', 'config.json')
+  const configPath = path.join(configHome, 'openawa', 'config.json')
   const raw = await readFile(configPath, 'utf8')
   return JSON.parse(raw) as AgentWalletConfig
 }
@@ -110,10 +110,10 @@ export async function readAgentWalletConfig(configHome: string): Promise<AgentWa
  */
 export function spawnCli(args: string[], env: NodeJS.ProcessEnv): CliHandle {
   if (DEBUG) {
-    console.error(`[e2e][spawnCli] node dist/agent-wallet.js ${args.join(' ')}`)
+    console.error(`[e2e][spawnCli] node dist/openawa.js ${args.join(' ')}`)
   }
 
-  const child = spawn('node', ['dist/agent-wallet.js', ...args], {
+  const child = spawn('node', ['dist/openawa.js', ...args], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
