@@ -52,7 +52,7 @@ describe('e2e flow', () => {
       expect(configureResult.payload).toMatchInlineSnapshot({
         account: { address: expect.any(String) },
         checkpoints: [
-          { details: { keyId: expect.any(String) } },
+          { details: { keyId: expect.any(String), publicKey: expect.any(String) } },
           { details: { address: expect.any(String), permissionId: expect.any(String) } },
         ],
       }, `
@@ -67,6 +67,7 @@ describe('e2e flow', () => {
               "details": {
                 "backend": "chipkey",
                 "keyId": Any<String>,
+                "publicKey": Any<String>,
               },
               "status": "created",
             },

@@ -17,8 +17,6 @@ export async function promptPermissionPolicy(opts: {
     expiryDays?: number
   }
 }): Promise<PermissionPolicy> {
-  p.intro('Configure permissions')
-
   // ── Allowed calls ──────────────────────────────────────────────────
   p.note('Which contracts may the agent call?', 'Allowed calls')
   const anyTarget = await p.confirm({
@@ -53,7 +51,6 @@ export async function promptPermissionPolicy(opts: {
   }
 
   // ── Spend limits ────────────────────────────────────────────────────
-  p.note('', 'Spend limits')
   const spendPeriod = await p.select({
     message: 'Spend limit period:',
     initialValue: opts.prefill?.spendPeriod ?? 'day',
@@ -98,7 +95,6 @@ export async function promptPermissionPolicy(opts: {
   if (p.isCancel(feeLimit)) { p.cancel('Cancelled'); process.exit(0) }
 
   // ── Expiry ──────────────────────────────────────────────────────────
-  p.note('', 'Expiry')
   const expiryDaysStr = await p.text({
     message: 'Valid for how many days?',
     placeholder: '7',
@@ -129,8 +125,6 @@ export async function promptPermissionPolicy(opts: {
 
   const confirmed = await p.confirm({ message: 'Grant these permissions?', initialValue: true })
   if (p.isCancel(confirmed) || !confirmed) { p.cancel('Cancelled'); process.exit(0) }
-
-  p.outro('Permissions configured')
 
   return {
     calls,

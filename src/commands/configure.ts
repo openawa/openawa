@@ -4,7 +4,7 @@ import { Chains } from 'porto'
 import { parseEther, type Chain } from 'viem'
 import { varsSchema } from '../lib/vars.js'
 import { saveConfig, type AgentWalletConfig } from '../lib/config.js'
-import { AppError, toAppError } from '../lib/errors.js'
+import { AppError } from '../lib/errors.js'
 import { Address } from '../lib/zod.js'
 import { promptPermissionPolicy } from '../lib/permission-prompts.js'
 import { getChainByIdOrName } from '../porto/service.js'
@@ -20,8 +20,6 @@ type ConfigureCheckpoint = {
   status: ConfigureCheckpointStatus
   details?: Record<string, unknown>
 }
-
-const TOTAL_STEPS = 2
 
 // ── Chain selection ───────────────────────────────────────────────────────────
 
@@ -135,91 +133,14 @@ async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain, 
   }
 }
 
-// ── Error handling ────────────────────────────────────────────────────────────
-
-function nextActionForError(checkpoint: ConfigureCheckpointName, error: AppError) {
-  const hint = error.details?.hint
-  if (typeof hint === 'string' && hint.trim().length > 0) return hint
-
-  switch (error.code) {
-    case 'PORTO_LOCAL_RELAY_BIND_FAILED':
-      return 'Allow local loopback binding for Porto CLI relay, then re-run configure.'
-    case 'MISSING_ACCOUNT_ADDRESS':
-      return 'Re-run configure and complete the account step in the dialog.'
-    case 'MISSING_CHAIN_ID':
-      return 'Re-run configure with --chain <name|id> (e.g. --chain base-sepolia).'
-    case 'GRANT_FAILED':
-      return 'Re-run configure and complete the permission grant in the dialog.'
-    default:
-      if (checkpoint === 'account') {
-        return 'Retry configure and complete the account and permission dialog if prompted.'
-      }
-      return 'Fix the issue above, then re-run `openawa configure`.'
-  }
-}
-
-function makeStepError(checkpoint: ConfigureCheckpointName, error: unknown) {
-  const appError = toAppError(error)
-  return new AppError(appError.code, appError.message, {
-    ...appError.details,
-    checkpoint,
-    nextAction: nextActionForError(checkpoint, appError),
-  })
-}
-
-// ── Progress logging (stderr) ─────────────────────────────────────────────────
-
-function logStepStart(options: { now: string; step: number; title: string; you: string }) {
-  process.stderr.write(
-    [
-      `[Step ${String(options.step)}/${String(TOTAL_STEPS)}] ${options.title}`,
-      `Now: ${options.now}`,
-      `You: ${options.you}`,
-    ].join('\n') + '\n',
-  )
-}
-
-function logStepResult(options: { details?: string; status: ConfigureCheckpointStatus }) {
-  const label = options.status === 'failed' ? 'FAILED' : options.status === 'skipped' ? 'SKIPPED' : 'SUCCESS'
-  const lines = [`Result: ${label} (${options.status})`]
-  if (options.details) lines.push(`Details: ${options.details}`)
-  process.stderr.write(lines.join('\n') + '\n\n')
-}
-
-function logStepFailure(checkpoint: ConfigureCheckpointName, error: AppError) {
-  process.stderr.write(
-    [
-      `Result: FAILED (${error.code})`,
-      `Error: ${error.message}`,
-      `Next: ${nextActionForError(checkpoint, error)}`,
-      '',
-    ].join('\n'),
-  )
-}
-
 // ── Steps ─────────────────────────────────────────────────────────────────────
 
 async function runAgentKeyStep(signer: SignerService, config: AgentWalletConfig): Promise<ConfigureCheckpoint> {
-  logStepStart({
-    step: 1,
-    title: 'Agent key readiness',
-    now: 'Ensure the local Secure Enclave agent key exists and is usable.',
-    you: 'No manual action unless macOS asks for keychain/biometric confirmation.',
-  })
-
-  try {
-    const initialized = await signer.init()
-    await signer.getPortoKey()
-    saveConfig(config)
-
-    const status = initialized.created ? 'created' : 'already_ok'
-    logStepResult({ status, details: `Secure Enclave key ${initialized.created ? 'created' : 'already exists'} (${initialized.keyId}).` })
-    return { checkpoint: 'agent_key', status, details: { backend: initialized.backend, keyId: initialized.keyId } }
-  } catch (error) {
-    const appError = toAppError(error)
-    logStepFailure('agent_key', appError)
-    throw makeStepError('agent_key', appError)
-  }
+  const initialized = await signer.init()
+  const { publicKey } = await signer.getPortoKey()
+  saveConfig(config)
+  const status = initialized.created ? 'created' : 'already_ok'
+  return { checkpoint: 'agent_key', status, details: { backend: initialized.backend, keyId: initialized.keyId, publicKey } }
 }
 
 type AccountStepResult = {
@@ -236,69 +157,51 @@ async function runAccountStep(
   chain: Chain,
   policy: PermissionPolicy,
 ): Promise<AccountStepResult> {
-  logStepStart({
-    step: 2,
-    title: 'Account & permissions',
-    now: 'Connect or create account and grant agent permissions.',
-    you: 'Approve the passkey and permissions in your browser dialog.',
-  })
+  const hadAddress = Boolean(config.porto?.address)
+  const shouldOnboard = Boolean(options.createAccount) || !config.porto?.address
 
-  try {
-    const hadAddress = Boolean(config.porto?.address)
-    const shouldOnboard = Boolean(options.createAccount) || !config.porto?.address
+  let address: `0x${string}`
+  let chainId: number | undefined
+  let permissionId: `0x${string}` | undefined
+  let status: ConfigureCheckpointStatus
 
-    let address: `0x${string}`
-    let chainId: number | undefined
-    let permissionId: `0x${string}` | undefined
-    let status: ConfigureCheckpointStatus
-    let summary: string
+  if (shouldOnboard) {
+    const onboardResult = await porto.onboard({
+      policy,
+      chain,
+      createAccount: options.createAccount,
+      dialogHost: options.dialog,
+    })
+    address = onboardResult.address
+    chainId = onboardResult.chainId
+    permissionId = onboardResult.grantedPermission?.id
+    status = hadAddress ? 'updated' : 'created'
+    saveConfig(config)
+  } else {
+    address = config.porto!.address!
+    chainId = chain.id
 
-    if (shouldOnboard) {
-      const onboardResult = await porto.onboard({
-        policy,
-        chain,
-        createAccount: options.createAccount,
-        dialogHost: options.dialog,
-      })
-      address = onboardResult.address
-      chainId = onboardResult.chainId
-      permissionId = onboardResult.grantedPermission?.id
-      status = hadAddress ? 'updated' : 'created'
-      summary = `Account ready at ${address} on chain ${String(chainId)}.`
+    const existing = await porto.findMatchingPermission({
+      address,
+      policy,
+      chainId,
+      precallPermissions: config.porto?.precallPermissions,
+    })
+
+    if (existing) {
+      permissionId = existing.id
+      if (existing.chainId !== undefined) chainId = existing.chainId
+      status = 'already_ok'
       saveConfig(config)
     } else {
-      address = config.porto!.address!
-      chainId = chain.id
-
-      const existing = await porto.findMatchingPermission({
-        address,
-        policy,
-        chainId,
-        precallPermissions: config.porto?.precallPermissions,
-      })
-
-      if (existing) {
-        permissionId = existing.id
-        if (existing.chainId !== undefined) chainId = existing.chainId
-        status = 'already_ok'
-        summary = `Permission already configured (${permissionId}).`
-        saveConfig(config)
-      } else {
-        const grantResult = await porto.grant({ address, chain, policy })
-        permissionId = grantResult.permissionId
-        status = 'updated'
-        summary = `Permission granted (${permissionId}).`
-        saveConfig(config)
-      }
+      const grantResult = await porto.grant({ address, chain, policy })
+      permissionId = grantResult.permissionId
+      status = 'updated'
+      saveConfig(config)
     }
-
-    logStepResult({ status, details: summary })
-    return { checkpoint: { checkpoint: 'account', status, details: { address, chainId, permissionId } }, address, chainId, permissionId }
-  } catch (error) {
-    const appError = toAppError(error)
-    logStepFailure('account', appError)
-    throw makeStepError('account', appError)
   }
+
+  return { checkpoint: { checkpoint: 'account', status, details: { address, chainId, permissionId } }, address, chainId, permissionId }
 }
 
 // ── Command ───────────────────────────────────────────────────────────────────
@@ -339,12 +242,23 @@ export const configureCommand = Cli.create('configure', {
   async run(c) {
     const { config, porto, signer } = c.var
 
-    process.stderr.write('Configure wallet (local-admin setup)\nPowered by Porto\n\n')
+    p.intro('Configure wallet  ·  local-admin')
 
     const agentKeyCheckpoint = await runAgentKeyStep(signer, config)
+    const { keyId, publicKey } = agentKeyCheckpoint.details as { keyId: string; backend: string; publicKey: string }
+    p.note(
+      [`ID:         ${keyId}`, `Public key: ${publicKey}`].join('\n'),
+      agentKeyCheckpoint.status === 'created' ? 'Agent key created' : 'Agent key ready',
+    )
+
     const chain = await resolveConfigureChain(c.options, c.agent)
     const policy = await resolvePermissionPolicy(c.options, chain, c.agent)
+
+    // Note: porto/cli/Dialog prints the browser URL via raw console.log — known cosmetic limitation.
     const accountResult = await runAccountStep(porto, config, c.options, chain, policy)
+    p.log.step(`Account ready  (${accountResult.address})`)
+
+    p.outro('Setup complete!  Run `openawa status` to inspect your account.')
 
     const result = {
       account: { address: accountResult.address, chainId: accountResult.chainId ?? config.porto?.chainIds?.[0] },
