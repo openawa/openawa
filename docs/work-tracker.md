@@ -64,6 +64,7 @@ Latest validation on this machine (2026-03-06):
 
 ## Done (Recent)
 
+- Declared Node.js 22 as the minimum supported runtime in `package.json` and switched CI `setup-node` to read the version from `package.json`.
 - Added Husky and lint-staged pre-commit hooks so staged JS/TS files are auto-fixed with Oxlint and formatted with Oxfmt before commit.
 - Adopted `oxfmt` and `oxlint`, added `pnpm run check`, and added CI coverage for format/lint/typecheck plus build and unit test.
 - Updated `AGENTS.md` to require Conventional Commit titles and to explicitly self-improve the workflow notes when durable repo-specific learnings emerge.

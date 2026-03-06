@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           cache: pnpm
-          node-version: 22
+          node-version-file: package.json
 
       - name: Enable Corepack
         run: corepack enable

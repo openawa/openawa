@@ -48,5 +48,8 @@
     ],
     "**/*.{json,jsonc,md,yaml,yml}": "oxfmt"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "packageManager": "pnpm@10.30.3"
 }

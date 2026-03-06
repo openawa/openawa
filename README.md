@@ -43,6 +43,7 @@ This is a different trust model than hosted-key or hosted-TEE stacks: OpenAwa ke
 OpenAwa is currently developed as a source-first alpha package.
 
 ```bash
+# Node.js 22+
 pnpm install
 pnpm check
 pnpm build
