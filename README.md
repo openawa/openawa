@@ -1,140 +1,197 @@
-# Agent Wallet
+# OpenAwa
 
-Secure-by-default wallet CLI for autonomous agents.
+OpenAwa is a security-first wallet CLI for autonomous agents.
 
-Goal:
-- Give an agent a real wallet with hardware-backed signing and least-privilege execution defaults.
-- Keep backend/provider details secondary to the operator experience.
+Tagline: "Your agent's wallet. Your hardware. Your keys."
 
-Current backend: Porto.
+It gives an agent a hardware-backed signing key plus onchain policy boundaries:
+- Keys are created on your device and are non-extractable by default.
+- A human admin grants constrained permissions for what the agent can do.
+- The smart account enforces those constraints on every execution.
 
-## Status
-Work in progress.
+OpenAwa is powered by [Porto](https://porto.sh) for account and relay workflows, while key custody stays local.
 
-Current code includes a functioning TypeScript scaffold with:
-- macOS Secure Enclave signing backend
-- Porto onboarding/permissions/send integration
-- e2e test harness
+Core value:
+- Local key custody instead of cloud-held agent keys.
+- Onchain enforcement of spend limits, call scope, and expiry.
+- Open-source backend infrastructure instead of a closed hosted black box.
 
-Security note:
-- Current implementation stores Secure Enclave opaque handle in config.
-- Follow-up: move this handle to OS keychain storage.
+## Alpha Status
 
-## CLI Surface
-Top-level commands:
-1. `openawa configure`
-2. `openawa sign`
-3. `openawa status`
+This project is in alpha.
 
-Rationale:
-- `configure`: one-shot account setup (create/reuse account + authorize local agent key + apply default policy envelope).
-- `sign`: execute/sign actions within granted policy scope.
-- `status`: inspect account, key backend, permissions, and balance.
+Current scope:
+- Local-admin setup mode only (configure + passkey ceremony on the same machine).
+- Command surface is stable around `configure`, `sign`, and `status`.
+- macOS Secure Enclave path is the most exercised path today.
 
-MVP setup scope:
-- Local-admin setup only (configure and passkey admin ceremony on the same machine).
-- Remote-admin setup (admin ceremony on separate device) is deferred to a later version.
+## Why OpenAwa
 
-Porto should remain visible as "powered by Porto", but not drive primary command naming.
+Compared with cloud-key agent wallet products like [Coinbase Agentic Wallet](https://docs.cdp.coinbase.com/agentic-wallet/welcome), [Privy](https://www.privy.io/), [Turnkey](https://www.turnkey.com/), and [Sponge](https://paysponge.com/docs), OpenAwa focuses on:
+- Hardware-bound key custody: private signing key stays on your machine.
+- Policy-bound autonomy: bounded permissions instead of unconstrained private key use.
+- Open, inspectable CLI workflow: explicit setup, explicit grants, explicit status.
 
-## Multi-Account Direction
-- Multiple accounts should be first-class.
-- Account selection should use `--account <address-or-alias>`.
-- Alias + default account support should be added in config model.
+This is a different trust model than hosted-key or hosted-TEE stacks: OpenAwa keeps the signing primitive on operator-owned hardware and uses onchain permissions for runtime boundaries.
 
-## Output
+## Quick Start (From Source)
 
-- Default format: **TOON** (token-efficient key-value; human-readable in terminal)
-- Use `--format json|yaml|md|jsonl` or `--json` to override on any command
-- `configure`: interactive on a TTY; structured output available to agents via `--json`
-- `sign`: TOON default, JSON recommended for agents
-- `status`: TOON default, JSON available
+OpenAwa is currently developed as a source-first alpha package.
 
-## Agent Discovery
-
-openawa is an [incur](https://github.com/wevm/incur) CLI — agents can discover and consume it
-without manual configuration:
-
-```sh
-openawa skills add  # sync skill files into your agent's context (recommended)
-openawa mcp add     # register as an MCP server
-openawa --llms      # print machine-readable command manifest
-```
-
-## Design Principles
-- Security-first defaults
-- Non-extractable private key material
-- Policy-bound autonomy (expiry, spend limits, allowlists)
-- Clear machine-readable outputs/errors
-- Strong non-interactive ergonomics for agent environments
-
-## Security Model
-This follows Porto's delegated-key model with hardened local signing:
-
-- The smart account is the enforcement boundary.
-- The human operator authenticates with a passkey admin key (WebAuthn).
-- Local passkey authorization requires explicit user interaction, so the agent cannot silently self-authorize by itself.
-- The agent uses a Secure Enclave-backed P-256 key that is non-extractable.
-- The admin grants scoped permissions to the agent key.
-- On every execution, the smart account enforces key binding, call scope, spend limits, and expiry.
-
-What this protects well:
-- Agent cannot leak raw private key material from Secure Enclave.
-
-What remains risky:
-- An agent can still issue unintended commands if instructed to do so.
-- Mitigation is strict least-privilege permissions, short expiry windows, and easy revoke/rotate workflows.
-- In MVP local-admin mode, compromise of the agent host can still trigger admin-approval attempts on that host.
-
-## Custody and Portability
-- Key custody is non-custodial: agent and admin keys are controlled by the user (not held by a third-party custodian).
-- Current execution path uses Porto infrastructure, but custody remains with user-controlled keys.
-- Architecture intent is backend portability via an internal provider adapter (Porto first, others possible later).
-- This is not "zero dependency", but it is designed to avoid provider custody lock-in.
-
-```mermaid
-flowchart LR
-    H["Human Operator"] --> P["Passkey Admin Key"]
-    P --> SA["Smart Account"]
-    A["Agent Runtime"] --> SE["Secure Enclave Agent Key"]
-    P -->|Authorize Session Permissions| SA
-    SE -->|Sign Prepared Call Digest| A
-    A -->|Submit Calls| R["Porto Relay"]
-    R --> SA
-    SA -->|Enforce Key, Scope, Spend, Expiry| C["Blockchain Execution"]
-```
-
-## Development
-Install/build:
 ```bash
 npm install
 npm run typecheck
 npm run build
 ```
 
-Current command surface:
+Run commands with:
+
 ```bash
-node dist/openawa.js configure --calls '[{"to":"0xabc..."}]' --testnet
-node dist/openawa.js sign --calls '[{"to":"0xabc...","data":"0x","value":"0x0"}]'
-node dist/openawa.js status --human
+node dist/cli.js <command> [options]
 ```
 
-Spec source of truth:
-- `/Users/jean/src/github.com/jeanregisser/openawa/docs/cli-spec.md`
+Minimal flow:
 
-## Known Issues
+```bash
+# 1) Configure account + permissions
+node dist/cli.js configure --chain base-sepolia
 
-### Multichain status may show stale permissions on undeployed chains
+# 2) Inspect current state
+node dist/cli.js status --chain base-sepolia
 
-When an account is configured on multiple chains, `status` may briefly show incorrect permission details (spend limits, call targets) for chains where the account hasn't been deployed on-chain yet.
+# 3) Submit a call bundle
+# Replace the payload below with your own contract call.
+node dist/cli.js sign \
+  --chain base-sepolia \
+  --calls '[{"to":"0xabc...","data":"0x...","value":"0x0"}]'
+```
 
-**Root cause**: The Porto relay stores account setup data in a table keyed by address only (no chain_id). When `wallet_getKeys` is called for a chain where the account isn't yet delegated, the relay falls back to this table and returns all keys — including session key permissions that belong to a different chain.
+Three commands, three jobs:
+1. `configure` initializes or reuses the local key, connects the account, and grants permissions.
+2. `sign` signs and submits prepared calls using the configured chain context.
+3. `status` shows account, signer health, activation state, permissions, and balances.
 
-**Scope**: Only affects the window between `configure` and the first on-chain transaction on each chain. Once a chain has a committed transaction, keys are read from on-chain and the stale data is never consulted.
+## Chain Selection
 
-**Mitigation**: A fix has been authored in the relay ([`CreatableAccount` chain_id scoping](docs/work-tracker.md#known-upstream-issues)) but is not yet merged upstream. The openawa code is written to be correct once the relay fix lands — `findGrantedPermission` does not fall back across chains.
+Chain resolution accepts numeric IDs or names (case-insensitive, spaces/hyphens ignored):
+- `--chain 84532`
+- `--chain base-sepolia`
+- `--chain "Base Sepolia"`
 
-## Near-Term Priorities
-- Move signer handle persistence into keychain.
-- Add remote-admin setup as a post-MVP mode.
-- Evaluate additional backend adapters later (e.g., ZeroDev, Privy, Para, others) if they improve the security/operability tradeoff.
+Behavior:
+- One configured chain: `sign` can omit `--chain`.
+- Multiple configured chains: `sign` requires `--chain` and returns `AMBIGUOUS_CHAIN` otherwise.
+- `status` shows all configured chains by default; `--chain` filters.
+
+## Security Model
+
+Trust boundaries:
+- Smart account is the policy enforcement point.
+- Human admin key (passkey/WebAuthn) controls grant authority.
+- Agent key is P-256, hardware-backed, non-extractable.
+
+Passkey-gated reconfiguration:
+- Account creation/configuration and permission changes require interactive passkey approval in standard WebAuthn/passkey flows.
+- The agent cannot silently reconfigure its own permissions without human approval.
+
+Why this mitigates malicious signing:
+- The agent can only execute calls that match the granted permission envelope.
+- Allowed contract targets/selectors, spend limits, and expiry are enforced by the smart account onchain.
+- If an agent signs an out-of-scope request, execution is rejected onchain.
+
+What "non-extractable" means here:
+- The private key is not returned to user space as raw key bytes.
+- Under standard platform threat models, the private key is non-extractable (non-exportable) from Secure Enclave/TPM-backed storage, though a compromised host may still invoke signing while access is live.
+
+Residual risks:
+- Prompt/tool misuse can still request unintended calls.
+- In local-admin MVP mode, host compromise can still attempt approval workflows.
+- This protection assumes passkeys are securely stored by the platform or passkey manager in use.
+- Stronger separation is planned via off-device admin approval on a different trusted device.
+
+```mermaid
+flowchart LR
+    H["Human Operator"] --> P["Passkey Admin Key"]
+    P --> SA["Smart Account"]
+    A["Agent Runtime"] --> SE["Secure Enclave Agent Key"]
+    P -->|"Authorize Session Permissions"| SA
+    SE -->|"Sign Prepared Call Digest"| A
+    A -->|"Submit Calls"| R["Porto Relay"]
+    R --> SA
+    SA -->|"Enforce Key, Scope, Spend, Expiry"| C["Blockchain Execution"]
+```
+
+## Powered By Porto
+
+OpenAwa keeps Porto as an internal backend, but you still inherit Porto's capabilities:
+- Multi-chain account operations across Porto-supported chains, including examples like Base, Arbitrum One, OP Mainnet, Ethereum, Polygon, Base Sepolia, and OP Sepolia.
+- Fee-token-aware UX: configure and funding checks read supported fee tokens from relay capabilities, not just native token balances.
+- Permission primitives used by OpenAwa policy setup: call scope, spend limits, fee caps, and expiry.
+- Relay execution plumbing for call submission and status, including relay bundle IDs and onchain transaction hashes.
+
+Porto and relay model:
+- [Porto](https://porto.sh) provides the account and permission primitives.
+- [Porto SDK Docs](https://porto.sh/sdk) document the underlying model and APIs.
+- [Relay](https://github.com/ithacaxyz/relay) is fully open source and acts as the relay/RPC layer for account operations and submission.
+- The relay is not the key custodian for the local hardware-backed agent key and does not need raw private key material from the local signer.
+
+Relay account lifecycle:
+1. Onboarding uses Porto's ephemeral-PK approach during account connection and creation via `wallet_connect`.
+2. The passkey admin key is the high-authority key for account management and permission changes.
+3. The admin grants constrained permissions to the agent key.
+4. The agent signs locally; relay submits; the smart account enforces policy onchain.
+
+Background:
+- [Why did Ithaca drop prep in favor of the ephemeral-PK approach?](https://porto.sh/sdk/faq#why-did-ithaca-drop-prep-in-favor-of-the-ephemeral-pk-approach)
+
+## Local Key Management Stack
+
+OpenAwa's local signer backend uses:
+- [`chipkey`](https://github.com/jeanregisser/chipkey): hardware-backed key management CLI using Secure Enclave on macOS and TPM 2.0 on Linux/Windows.
+- [`sks` (Secure Key Store)](https://github.com/facebookincubator/sks): the underlying cross-platform key-store abstraction used by chipkey.
+
+If you want deeper implementation details around local key storage and signing behavior, the chipkey repository is the best reference.
+
+## Agent Integrations (Incur)
+
+OpenAwa is built with [incur](https://github.com/wevm/incur), so agent discovery/integration is first-class:
+
+```bash
+node dist/cli.js skills add  # install skill files into agent context
+node dist/cli.js mcp add     # register CLI as an MCP server
+node dist/cli.js --llms      # emit machine-readable manifest
+```
+
+## Configuration
+
+Config directory:
+- macOS: `~/Library/Application Support/openawa`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/openawa`
+- Windows: `%APPDATA%/openawa`
+
+Override root path with:
+- `AGENT_WALLET_CONFIG_HOME`
+
+Relay endpoint override:
+- `AGENT_WALLET_RELAY_URL`
+
+## Development
+
+```bash
+npm run build
+npm run typecheck
+npm run test
+npm run test:e2e
+```
+
+## Shoutouts
+
+Big shoutout to the teams and projects making this possible:
+- [Porto](https://porto.sh) and [Relay](https://github.com/ithacaxyz/relay) from [Ithaca](https://github.com/ithacaxyz)
+- [incur](https://github.com/wevm/incur), [viem](https://github.com/wevm/viem), and the folks at [wevm](https://wevm.dev/)
+
+## Roadmap (Post-Alpha)
+
+- Remote-admin setup mode (admin ceremony off-device for stronger host-compromise separation).
+- Account profile ergonomics (alias + default selection).
+- Additional backend adapters only where security/operability improves.
