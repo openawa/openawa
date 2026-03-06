@@ -2,20 +2,64 @@ import { describe, expect, it, onTestFinished } from 'vitest'
 
 import {
   buildConfigureArgs,
-  ensureAccountFunding,
   extractDialogUrl,
   getLiveNetwork,
   launchVirtualBrowser,
   makeIsolatedEnv,
   readAgentWalletConfig,
   runCli,
-  spawnCli,
+  spawnCliInteractive,
+  type InteractiveCliHandle,
 } from './helpers.js'
 
 const FLOW_TIMEOUT_MS = 10 * 60 * 1_000
 const DIALOG_URL_PATTERN = /https?:\/\/\S+\/dialog\S*relayUrl=/
 const DEAD_ADDRESS = '0x000000000000000000000000000000000000dEaD' as const
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
+
+/**
+ * Drives the interactive clack prompts in `configure` by sending keystrokes.
+ * Waits for each prompt to render before sending input.
+ */
+async function driveConfigurePrompts(
+  handle: InteractiveCliHandle,
+  options: { calls?: string[] } = {},
+): Promise<void> {
+  const { calls } = options
+
+  await handle.waitFor('Allow calls to any contract')
+  if (calls?.length) {
+    handle.sendKeys('\r') // "No" (initialValue=false when calls prefilled)
+    for (const addr of calls) {
+      await handle.waitFor('Contract address')
+      handle.sendKeys(`${addr}\r`)
+      await handle.waitFor('Function signature')
+      handle.sendKeys('\r') // blank = any function
+      await handle.waitFor('Add another')
+      handle.sendKeys('\r') // No (initialValue: false)
+    }
+  } else {
+    handle.sendKeys('\r') // "Yes" (initialValue=true when no calls prefilled)
+  }
+
+  await handle.waitFor('Spend limit period')
+  handle.sendKeys('\r') // accept default
+
+  await handle.waitFor('Spend token address')
+  handle.sendKeys('\r') // blank = native ETH
+
+  await handle.waitFor('Spend limit in')
+  handle.sendKeys('\r') // accept prefilled default
+
+  await handle.waitFor('Fee cap per period')
+  handle.sendKeys('\r') // accept default
+
+  await handle.waitFor('Valid for how many days')
+  handle.sendKeys('\r') // accept default
+
+  await handle.waitFor('Grant these permissions')
+  handle.sendKeys('\r') // Yes (initialValue: true)
+}
 
 describe('e2e flow', () => {
   it(
@@ -32,17 +76,21 @@ describe('e2e flow', () => {
 
       // ── Configure: create account + grant permissions ───────────────────────
 
-      const configure = spawnCli(
+      const configure = spawnCliInteractive(
         buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', createAccount: true, dialogHost, json: true, spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
+      await driveConfigurePrompts(configure, { calls: [allowlistTo] })
       const configureDialogLine = await configure.waitFor(DIALOG_URL_PATTERN, 60_000)
       await page.goto(extractDialogUrl(configureDialogLine)!, { waitUntil: 'domcontentloaded' })
 
       // wallet_connect(createAccount + grantPermissions): sign-up triggers the passkey ceremony
       // and approves the permission grant in one step; WebAuthn virtual authenticator auto-responds.
       await page.getByTestId('sign-up').click()
+
+      // After sign-up the CLI sends wallet_addFunds; wait for the faucet button then click it.
+      await page.getByTestId('buy').click({ timeout: 30_000 })
 
       const configureResult = await configure.done()
       expect(
@@ -82,19 +130,6 @@ describe('e2e flow', () => {
             },
           ],
           "command": "configure",
-          "cta": {
-            "commands": [
-              {
-                "command": "openawa status",
-                "description": "Inspect the new account",
-              },
-              {
-                "command": "openawa sign",
-                "description": "Submit your first transaction",
-              },
-            ],
-            "description": "Suggested commands:",
-          },
           "poweredBy": "Porto",
           "setupMode": "local-admin",
         }
@@ -164,10 +199,6 @@ describe('e2e flow', () => {
           "warnings": [],
         }
       `)
-
-      // ── Fund account for signing tests (testnet only) ─────────────────────
-
-      await ensureAccountFunding({ accountAddress, chainId: 84532, network })
 
       // ── Sign an allowed call ──────────────────────────────────────────────
 
@@ -285,11 +316,12 @@ describe('e2e flow', () => {
 
       // ── Rerun configure: verify idempotency ───────────────────────────────
 
-      const rerun = spawnCli(
+      const rerun = spawnCliInteractive(
         buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', dialogHost, json: true, spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
+      await driveConfigurePrompts(rerun, { calls: [allowlistTo] })
       // A dialog may or may not appear on rerun depending on permission state
       const rerunDialogLine = await rerun.waitFor(DIALOG_URL_PATTERN, 15_000).catch(() => null)
       if (rerunDialogLine) {
@@ -333,11 +365,12 @@ describe('e2e flow', () => {
 
       // ── Regrant: force grant path by changing spend limit ─────────────────
 
-      const regrant = spawnCli(
+      const regrant = spawnCliInteractive(
         buildConfigureArgs({ calls: [allowlistTo], chain: 'base-sepolia', dialogHost, json: true, spendLimit: '0.02', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
+      await driveConfigurePrompts(regrant, { calls: [allowlistTo] })
       const regrantDialogLine = await regrant.waitFor(DIALOG_URL_PATTERN, 30_000)
       await page.goto(extractDialogUrl(regrantDialogLine)!, { waitUntil: 'domcontentloaded' })
       await page.getByTestId('sign-in').click()
@@ -417,14 +450,18 @@ describe('e2e flow', () => {
 
       // ── Second chain: configure OP Sepolia ────────────────────────────────
 
-      const secondChain = spawnCli(
+      const secondChain = spawnCliInteractive(
         buildConfigureArgs({ chain: 'op-sepolia', dialogHost, json: true, spendLimit: '0.01', spendPeriod: 'day', expiry: '7' }),
         env.env,
       )
 
+      await driveConfigurePrompts(secondChain)
       const secondChainDialogLine = await secondChain.waitFor(DIALOG_URL_PATTERN, 30_000)
       await page.goto(extractDialogUrl(secondChainDialogLine)!, { waitUntil: 'domcontentloaded' })
       await page.getByTestId('sign-in').click()
+
+      // After sign-up the CLI sends wallet_addFunds; wait for the faucet button then click it.
+      await page.getByTestId('buy').click({ timeout: 30_000 })
 
       const secondChainResult = await secondChain.done()
       expect(

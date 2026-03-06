@@ -25,6 +25,7 @@
     "@types/node": "^22.13.4",
     "@vitest/browser-playwright": "^4.0.18",
     "execa": "^9.5.2",
+    "node-pty": "^1.2.0-beta.11",
     "playwright": "^1.56.1",
     "tsup": "^8.4.0",
     "tsx": "^4.20.3",

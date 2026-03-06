@@ -1,6 +1,7 @@
 import { Chains, Mode, Porto } from 'porto'
+import * as RelayActions from 'porto/viem/RelayActions'
 import * as WalletActions from 'porto/viem/WalletActions'
-import { createPublicClient, formatEther, http, parseEther, type Chain } from 'viem'
+import { createClient, createPublicClient, formatEther, http, parseEther, type Chain } from 'viem'
 import { getCallsStatus } from 'viem/actions'
 import * as WalletClient from 'porto/viem/WalletClient'
 
@@ -122,6 +123,26 @@ type AgentPermissionSnapshot = {
   }
 }
 
+function isAddress(value: unknown): value is `0x${string}` {
+  return typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value)
+}
+
+function extractAddressesFromTokenArray(value: unknown): `0x${string}`[] {
+  if (!Array.isArray(value)) return []
+  const tokens = value
+    .map((token) => (isObject(token) ? token.address : undefined))
+    .filter((address): address is `0x${string}` => isAddress(address))
+
+  const deduped = new Map<string, `0x${string}`>()
+  for (const address of tokens) {
+    const key = address.toLowerCase()
+    if (!deduped.has(key)) {
+      deduped.set(key, address)
+    }
+  }
+  return [...deduped.values()]
+}
+
 /**
  * Resolves a Porto chain by numeric ID or by name (case-insensitive, spaces/hyphens ignored).
  * Examples: 8453, "base-sepolia", "Base Sepolia", "basesepolia", "op-mainnet", "opmainnet"
@@ -193,6 +214,13 @@ function normalizeDialogHost(host?: string) {
 
 function normalizeRelayRpcUrl() {
   return process.env.AGENT_WALLET_RELAY_URL ?? DEFAULT_RELAY_RPC_URL
+}
+
+function getRelayClient(chain: Chain) {
+  return createClient({
+    chain,
+    transport: http(normalizeRelayRpcUrl()),
+  })
 }
 
 function normalizeRelayKeyType(type: RelayKeyRecord['type']) {
@@ -1075,6 +1103,61 @@ export class PortoService {
           name: chain.name,
         }
       : undefined
+  }
+
+  private async getSupportedFeeTokenAddresses(
+    relayClient: ReturnType<typeof getRelayClient>,
+    chainId: number,
+  ): Promise<`0x${string}`[]> {
+    const capabilities = await RelayActions.getCapabilities(relayClient, { chainId })
+    const addresses = isObject(capabilities) && isObject(capabilities.fees)
+      ? extractAddressesFromTokenArray(capabilities.fees.tokens)
+      : []
+
+    if (addresses.length === 0) {
+      throw new AppError(
+        'RELAY_INVALID_RESPONSE',
+        'Porto capabilities response is missing supported fee tokens for the selected chain.',
+        { chainId },
+      )
+    }
+    return addresses
+  }
+
+  async hasFundsInSupportedFeeTokens(options: { address?: `0x${string}`; chainId?: number }): Promise<boolean> {
+    const address = options.address ?? this.config.porto?.address
+    if (!address) {
+      throw new AppError('MISSING_ACCOUNT_ADDRESS', 'No account address configured. Run `openawa configure` first.')
+    }
+
+    const chain = resolveConfiguredChain(this.config, options.chainId)
+    if (!chain) {
+      throw new AppError('MISSING_CHAIN_ID', 'No chain configured. Re-run configure with an explicit network.')
+    }
+
+    const relayClient = getRelayClient(chain)
+    const [supportedFeeTokens, assets] = await Promise.all([
+      this.getSupportedFeeTokenAddresses(relayClient, chain.id),
+      RelayActions.getAssets(relayClient, {
+        account: address,
+        chainFilter: [chain.id],
+      }),
+    ])
+    const supportedSet = new Set(supportedFeeTokens.map((token) => token.toLowerCase()))
+
+    const chainAssets = assets[chain.id]
+    if (!chainAssets) {
+      throw new AppError('RELAY_INVALID_RESPONSE', 'Porto assets response is missing the selected chain.', {
+        chainId: chain.id,
+      })
+    }
+
+    return chainAssets.some((asset) => {
+      if (asset.balance <= 0n) return false
+      if (asset.type === 'native') return supportedSet.has(NATIVE_TOKEN_ADDRESS)
+      if (asset.type === 'erc20') return supportedSet.has(asset.address.toLowerCase())
+      return false
+    })
   }
 
   async balance(options: { address?: `0x${string}`; chainId?: number }) {

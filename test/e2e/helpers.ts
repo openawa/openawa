@@ -4,9 +4,22 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { execa } from 'execa'
+import { spawn as ptySpawn } from 'node-pty'
 import { chromium, type Page } from 'playwright'
 import { createPublicClient, http } from 'viem'
 import { baseSepolia } from 'viem/chains'
+
+type PendingMatcher = {
+  pattern: string | RegExp
+  resolve: (line: string) => void
+  reject: (err: Error) => void
+  timeoutId: ReturnType<typeof setTimeout>
+}
+
+function stripAnsiCodes(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1B\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '')
+}
 
 export type CliRunResult = {
   exitCode: number
@@ -18,6 +31,10 @@ export type CliRunResult = {
 export type CliHandle = {
   waitFor(pattern: string | RegExp, timeoutMs?: number): Promise<string>
   done(): Promise<CliRunResult>
+}
+
+export type InteractiveCliHandle = CliHandle & {
+  sendKeys(keys: string): void
 }
 
 export type VirtualBrowser = {
@@ -126,13 +143,6 @@ export function spawnCli(args: string[], env: NodeJS.ProcessEnv): CliHandle {
 
   const bufferedLines: string[] = []
 
-  type PendingMatcher = {
-    pattern: string | RegExp
-    resolve: (line: string) => void
-    reject: (err: Error) => void
-    timeoutId: ReturnType<typeof setTimeout>
-  }
-
   const pendingMatchers: PendingMatcher[] = []
 
   const checkMatchers = (line: string) => {
@@ -223,6 +233,128 @@ export function spawnCli(args: string[], env: NodeJS.ProcessEnv): CliHandle {
         payload: parseJsonPayload(output),
         stderr,
         stdout,
+      }
+    },
+  }
+}
+
+/**
+ * Like spawnCli but runs the process inside a PTY so clack prompts work.
+ * Use sendKeys() to answer prompts, waitFor() to gate on rendered text.
+ */
+export function spawnCliInteractive(args: string[], env: NodeJS.ProcessEnv): InteractiveCliHandle {
+  if (DEBUG) {
+    console.error(`[e2e][spawnCliInteractive] node dist/cli.js ${args.join(' ')}`)
+  }
+
+  const pty = ptySpawn(process.execPath, ['dist/cli.js', ...args], {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd: process.cwd(),
+    env: env as Record<string, string>,
+  })
+
+  let cleanOutput = ''
+  let lineBuffer = ''
+  let cliExited = false
+  let cliExitCode = 1
+  const bufferedLines: string[] = []
+  const pendingMatchers: PendingMatcher[] = []
+
+  const checkMatchers = (line: string) => {
+    for (let i = pendingMatchers.length - 1; i >= 0; i--) {
+      const matcher = pendingMatchers[i]!
+      const matched = typeof matcher.pattern === 'string' ? line.includes(matcher.pattern) : matcher.pattern.test(line)
+      if (matched) {
+        clearTimeout(matcher.timeoutId)
+        pendingMatchers.splice(i, 1)
+        matcher.resolve(line)
+      }
+    }
+  }
+
+  const onLine = (line: string) => {
+    bufferedLines.push(line)
+    if (DEBUG) console.error(`[e2e][pty] ${line}`)
+    checkMatchers(line)
+  }
+
+  pty.onData((data) => {
+    const clean = stripAnsiCodes(data)
+    cleanOutput += clean
+    lineBuffer += clean
+    while (lineBuffer.includes('\n')) {
+      const idx = lineBuffer.indexOf('\n')
+      const line = lineBuffer.slice(0, idx).trimEnd()
+      lineBuffer = lineBuffer.slice(idx + 1)
+      if (line.trim()) onLine(line)
+    }
+  })
+
+  pty.onExit(({ exitCode }) => {
+    cliExited = true
+    cliExitCode = exitCode
+    if (lineBuffer.trim()) {
+      onLine(lineBuffer.trim())
+      lineBuffer = ''
+    }
+    for (const matcher of [...pendingMatchers]) {
+      clearTimeout(matcher.timeoutId)
+      matcher.reject(new Error(`CLI exited before pattern matched: ${String(matcher.pattern)}`))
+    }
+    pendingMatchers.length = 0
+  })
+
+  return {
+    waitFor(pattern: string | RegExp, timeoutMs = 30_000): Promise<string> {
+      for (const line of bufferedLines) {
+        const matched = typeof pattern === 'string' ? line.includes(pattern) : pattern.test(line)
+        if (matched) return Promise.resolve(line)
+      }
+      if (cliExited) {
+        return Promise.reject(new Error(`CLI already exited; pattern not found: ${String(pattern)}`))
+      }
+      return new Promise<string>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          const idx = pendingMatchers.findIndex((m) => m.timeoutId === timeoutId)
+          if (idx !== -1) pendingMatchers.splice(idx, 1)
+          reject(new Error(`Timed out after ${String(timeoutMs)}ms waiting for: ${String(pattern)}`))
+        }, timeoutMs)
+        pendingMatchers.push({ pattern, resolve, reject, timeoutId })
+      })
+    },
+
+    sendKeys(keys: string): void {
+      pty.write(keys)
+    },
+
+    async done(): Promise<CliRunResult> {
+      if (!cliExited) {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            pty.kill()
+            reject(new Error(`CLI timed out after ${String(PROCESS_TIMEOUT_MS)}ms`))
+          }, PROCESS_TIMEOUT_MS)
+          pty.onExit(() => {
+            clearTimeout(timeout)
+            resolve()
+          })
+        })
+      }
+      if (lineBuffer.trim()) {
+        onLine(lineBuffer.trim())
+        lineBuffer = ''
+      }
+      const output = cleanOutput.trim()
+      if (DEBUG) {
+        console.error(`[e2e][pty][done] exit=${String(cliExitCode)}\noutput:\n${output}`)
+      }
+      return {
+        exitCode: cliExitCode,
+        payload: parseJsonPayload(output),
+        stderr: '',
+        stdout: cleanOutput,
       }
     },
   }
@@ -397,15 +529,31 @@ async function waitForProcessExit(
 function parseJsonPayload(output: string): Record<string, unknown> | unknown[] | null {
   if (!output) return null
   // incur writes pretty-printed JSON as the last block; find the last line
-  // starting with { or [ and parse from there to end of output.
+  // starting with { or [ and parse from there. When running in a PTY, extra
+  // text (e.g. "Suggested commands:") may follow the closing brace, so also
+  // try stopping at the last standalone } or ] line.
   const lines = output.split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
-    const trimmed = lines[i]!.trim()
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        return JSON.parse(lines.slice(i).join('\n')) as Record<string, unknown> | unknown[]
-      } catch {
-        // continue searching upward
+    const line = lines[i]!
+    // Only match unindented { or [ — these are top-level JSON objects/arrays.
+    // Indented ones are nested and should not be parsed independently.
+    if (!line.startsWith('{') && !line.startsWith('[')) continue
+
+    // First try: parse from i to end of output
+    try {
+      return JSON.parse(lines.slice(i).join('\n')) as Record<string, unknown> | unknown[]
+    } catch {
+      // Second try: parse from i to the last standalone closer (handles PTY
+      // output that appends human-readable text after the closing brace).
+      const closer = line.startsWith('{') ? '}' : ']'
+      for (let j = lines.length - 1; j > i; j--) {
+        if (lines[j]!.trim() === closer) {
+          try {
+            return JSON.parse(lines.slice(i, j + 1).join('\n')) as Record<string, unknown> | unknown[]
+          } catch {
+            continue
+          }
+        }
       }
     }
   }

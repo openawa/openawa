@@ -52,6 +52,10 @@ Latest validation on this machine (2026-03-02):
 - Multi-account aliases and default profile ergonomics.
 - Evaluate additional backend adapters after Porto-first UX stabilizes.
 
+## Done (2026-03-05)
+- Updated configure funding detection to check balances across all Porto-supported fee tokens for the selected chain (native + ERC-20 fee tokens).
+- Switched fee-token discovery to Porto SDK `RelayActions.getCapabilities` and removed silent fallback/error-swallowing from configure funding detection.
+
 ## Done (2026-03-03)
 - Added colocated unit tests for `getChainByIdOrName` and `resolveCommandChain` (`src/porto/service.test.ts`, 20 tests).
 

@@ -70,6 +70,8 @@ Expected characteristics:
 - interactive by default (opens Porto dialog for passkey/account selection)
 - explicit human progress output with step context
 - per-step operator guidance (`Now`, `You`, result, and next action on failure)
+- funding detection checks all Porto-supported fee tokens for the selected chain (not only native balance)
+- funding detection reads fee-token support from Porto capabilities and surfaces capability/balance lookup errors directly (no silent fallback path)
 
 #### Chain selection (`--chain`)
 - `--chain <name|id>`: selects the chain for this configure run (required in non-interactive mode).

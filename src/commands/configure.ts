@@ -23,7 +23,7 @@ type ConfigureCheckpoint = {
 
 // ── Chain selection ───────────────────────────────────────────────────────────
 
-async function resolveConfigureChain(options: { chain?: string }, isAgent: boolean): Promise<Chain> {
+async function resolveConfigureChain(options: { chain?: string }): Promise<Chain> {
   if (options.chain) {
     const chain = getChainByIdOrName(options.chain)
     if (!chain) {
@@ -33,13 +33,6 @@ async function resolveConfigureChain(options: { chain?: string }, isAgent: boole
       )
     }
     return chain
-  }
-
-  if (isAgent) {
-    throw new AppError(
-      'NON_INTERACTIVE_REQUIRES_FLAGS',
-      'Non-interactive configure requires --chain <name|id> (e.g. --chain base-sepolia).',
-    )
   }
 
   // Interactive: show chain picker
@@ -92,45 +85,20 @@ type ConfigureOptions = {
   spendToken?: string
 }
 
-async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain, isAgent: boolean): Promise<PermissionPolicy> {
+async function resolvePermissionPolicy(options: ConfigureOptions, chain: Chain): Promise<PermissionPolicy> {
   const prefillCalls = options.call?.length ? options.call.map(parseCallArg) : undefined
 
-  if (!isAgent) {
-    return promptPermissionPolicy({
-      chain,
-      prefill: {
-        calls: prefillCalls ?? null,
-        spendLimit: options.spendLimit?.toString(),
-        spendPeriod: options.spendPeriod as SpendPeriod | undefined,
-        spendToken: options.spendToken,
-        feeLimit: options.feeLimit?.toString(),
-        expiryDays: options.expiry,
-      },
-    })
-  }
-
-  // Non-interactive: require explicit flags
-  if (options.spendLimit === undefined) {
-    throw new AppError(
-      'NON_INTERACTIVE_REQUIRES_FLAGS',
-      'Non-interactive configure requires --spend-limit <amount> (e.g. --spend-limit 0.01).',
-    )
-  }
-  if (options.expiry === undefined) {
-    throw new AppError(
-      'NON_INTERACTIVE_REQUIRES_FLAGS',
-      'Non-interactive configure requires --expiry <days> (e.g. --expiry 7).',
-    )
-  }
-
-  return {
-    calls: prefillCalls ?? null,
-    spendLimitWei: parseEther(options.spendLimit.toString() as `${number}`),
-    spendPeriod: options.spendPeriod as SpendPeriod,
-    ...(options.spendToken ? { spendToken: options.spendToken as `0x${string}` } : {}),
-    feeLimit: options.feeLimit?.toString() as `${number}` | undefined,
-    expiryDays: options.expiry,
-  }
+  return promptPermissionPolicy({
+    chain,
+    prefill: {
+      calls: prefillCalls ?? null,
+      spendLimit: options.spendLimit?.toString(),
+      spendPeriod: options.spendPeriod as SpendPeriod | undefined,
+      spendToken: options.spendToken,
+      feeLimit: options.feeLimit?.toString(),
+      expiryDays: options.expiry,
+    },
+  })
 }
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
@@ -208,15 +176,11 @@ async function runFundingStep(
   porto: PortoService,
   address: `0x${string}`,
   chainId: number | undefined,
-  dialogWasOpen: boolean,
-  isAgent: boolean,
 ): Promise<boolean> {
-  const balanceInfo = await porto.balance({ address, chainId })
-  if (BigInt(balanceInfo.wei) > 0n) return true
-  if (isAgent) return false
+  const hasFeeFunds = await porto.hasFundsInSupportedFeeTokens({ address, chainId })
+  if (hasFeeFunds) return true
 
-  if (dialogWasOpen) {
-    // Dialog session is still open — go straight to funding in the same tab.
+  if (porto.hasActiveSession()) {
     try {
       await porto.fund({ address, chainId, skipConnect: true })
       return true
@@ -286,8 +250,8 @@ export const configureCommand = Cli.create('configure', {
       agentKeyCheckpoint.status === 'created' ? 'Agent key created' : 'Agent key ready',
     )
 
-    const chain = await resolveConfigureChain(c.options, c.agent)
-    const policy = await resolvePermissionPolicy(c.options, chain, c.agent)
+    const chain = await resolveConfigureChain(c.options)
+    const policy = await resolvePermissionPolicy(c.options, chain)
 
     // Note: porto/cli/Dialog prints the browser URL via raw console.log — known cosmetic limitation.
     const accountResult = await runAccountStep(porto, config, c.options, chain, policy)
@@ -295,8 +259,7 @@ export const configureCommand = Cli.create('configure', {
 
     // ── Funding ───────────────────────────────────────────────────────────────
     const { address, chainId } = accountResult
-    const dialogWasOpen = porto.hasActiveSession()
-    const funded = await runFundingStep(porto, address, chainId, dialogWasOpen, c.agent)
+    const funded = await runFundingStep(porto, address, chainId)
 
     // Finalize the dialog (send success, lets the user close the tab).
     await porto.finalizeDialog({ title: 'Setup complete', content: 'You can close this window.' })
