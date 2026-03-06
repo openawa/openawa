@@ -39,9 +39,9 @@ This is a different trust model than hosted-key or hosted-TEE stacks: OpenAwa ke
 OpenAwa is currently developed as a source-first alpha package.
 
 ```bash
-npm install
-npm run typecheck
-npm run build
+pnpm install
+pnpm typecheck
+pnpm build
 ```
 
 Run commands with:
@@ -174,10 +174,10 @@ Relay endpoint override:
 ## Development
 
 ```bash
-npm run build
-npm run typecheck
-npm run test
-npm run test:e2e
+pnpm build
+pnpm typecheck
+pnpm test
+pnpm test:e2e
 ```
 
 ## Shoutouts
