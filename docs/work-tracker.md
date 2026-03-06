@@ -64,6 +64,7 @@ Latest validation on this machine (2026-03-06):
 - Upgraded `incur` from `0.1.17` to `0.2.2` and revalidated `typecheck`, `test`, and `test:e2e`.
 - Aligned caret lower bounds in `package.json` to the current resolved versions for direct deps, except `@types/node`.
 - Switched `porto` from an exact version spec to a caret range for consistency with the direct dependency policy.
+- Removed unused `@vitest/browser-playwright`; the repo's e2e flow uses plain Vitest plus direct `playwright` APIs.
 - Reduced the README local key management section to a single linked sentence pointing at `chipkey` and `@chipkey/cli`.
 
 ## Done (2026-03-03)

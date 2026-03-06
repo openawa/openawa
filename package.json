@@ -23,7 +23,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
-    "@vitest/browser-playwright": "^4.0.18",
     "execa": "^9.6.1",
     "node-pty": "^1.2.0-beta.11",
     "playwright": "^1.58.2",
