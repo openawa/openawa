@@ -1,6 +1,6 @@
-# OpenAwa
+# openawa
 
-OpenAwa is a security-first wallet CLI for autonomous agents.
+openawa is a security-first wallet CLI for autonomous agents.
 
 Tagline: "Your agent's wallet. Your hardware. Your keys."
 
@@ -10,7 +10,7 @@ It gives an agent a hardware-backed signing key plus onchain policy boundaries:
 - A human admin grants constrained permissions for what the agent can do.
 - The smart account enforces those constraints on every execution.
 
-OpenAwa is powered by [Porto](https://porto.sh) for account and relay workflows, while key custody stays local.
+openawa is powered by [Porto](https://porto.sh) for account and relay workflows, while key custody stays local.
 
 Core value:
 
@@ -28,19 +28,19 @@ Current scope:
 - Command surface is stable around `configure`, `sign`, and `status`.
 - macOS Secure Enclave path is the most exercised path today.
 
-## Why OpenAwa
+## Why openawa
 
-Compared with cloud-key agent wallet products like [Coinbase Agentic Wallet](https://docs.cdp.coinbase.com/agentic-wallet/welcome), [Privy](https://www.privy.io/), [Turnkey](https://www.turnkey.com/), and [Sponge](https://paysponge.com/docs), OpenAwa focuses on:
+Compared with cloud-key agent wallet products like [Coinbase Agentic Wallet](https://docs.cdp.coinbase.com/agentic-wallet/welcome), [Privy](https://www.privy.io/), [Turnkey](https://www.turnkey.com/), and [Sponge](https://paysponge.com/docs), openawa focuses on:
 
 - Hardware-bound key custody: private signing key stays on your machine.
 - Policy-bound autonomy: bounded permissions instead of unconstrained private key use.
 - Open, inspectable CLI workflow: explicit setup, explicit grants, explicit status.
 
-This is a different trust model than hosted-key or hosted-TEE stacks: OpenAwa keeps the signing primitive on operator-owned hardware and uses onchain permissions for runtime boundaries.
+This is a different trust model than hosted-key or hosted-TEE stacks: openawa keeps the signing primitive on operator-owned hardware and uses onchain permissions for runtime boundaries.
 
 ## Quick Start (From Source)
 
-OpenAwa is currently developed as a source-first alpha package.
+openawa is currently developed as a source-first alpha package.
 
 ```bash
 # Node.js 22+
@@ -136,11 +136,11 @@ flowchart LR
 
 ## Powered By Porto
 
-OpenAwa keeps Porto as an internal backend, but you still inherit Porto's capabilities:
+openawa keeps Porto as an internal backend, but you still inherit Porto's capabilities:
 
 - Multi-chain account operations across Porto-supported chains, including examples like Base, Arbitrum One, OP Mainnet, Ethereum, Polygon, Base Sepolia, and OP Sepolia.
 - Fee-token-aware UX: configure and funding checks read supported fee tokens from relay capabilities, not just native token balances.
-- Permission primitives used by OpenAwa policy setup: call scope, spend limits, fee caps, and expiry.
+- Permission primitives used by openawa policy setup: call scope, spend limits, fee caps, and expiry.
 - Relay execution plumbing for call submission and status, including relay bundle IDs and onchain transaction hashes.
 
 Porto and relay model:
@@ -163,11 +163,11 @@ Background:
 
 ## Local Key Management Stack
 
-OpenAwa uses the local [`chipkey`](https://github.com/jeanregisser/chipkey) CLI (npm package: [`@chipkey/cli`](https://www.npmjs.com/package/@chipkey/cli)) for hardware-backed key creation and signing.
+openawa uses the local [`chipkey`](https://github.com/jeanregisser/chipkey) CLI (npm package: [`@chipkey/cli`](https://www.npmjs.com/package/@chipkey/cli)) for hardware-backed key creation and signing.
 
 ## Agent Integrations (Incur)
 
-OpenAwa is built with [incur](https://github.com/wevm/incur), so agent discovery/integration is first-class:
+openawa is built with [incur](https://github.com/wevm/incur), so agent discovery/integration is first-class:
 
 ```bash
 node dist/cli.js skills add  # install skill files into agent context
