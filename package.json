@@ -13,6 +13,9 @@
   "bin": {
     "openawa": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "publishConfig": {
     "access": "public",

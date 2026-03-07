@@ -45,6 +45,7 @@ export default {
   },
   github: {
     release: true,
+    releaseName: '${tagName}',
   },
   npm: {
     allowSameVersion: true,
