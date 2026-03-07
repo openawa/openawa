@@ -38,9 +38,16 @@ Compared with cloud-key agent wallet products like [Coinbase Agentic Wallet](htt
 
 This is a different trust model than hosted-key or hosted-TEE stacks: openawa keeps the signing primitive on operator-owned hardware and uses onchain permissions for runtime boundaries.
 
-## Quick Start (From Source)
+## Quick Start
 
-openawa is currently developed as a source-first alpha package.
+Install from npm:
+
+```bash
+npm install -g @openawa/cli
+openawa --help
+```
+
+Or run from source:
 
 ```bash
 # Node.js 22+

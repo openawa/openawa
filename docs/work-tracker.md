@@ -50,6 +50,7 @@ Latest validation on this machine (2026-03-06):
 
 - Expand colocated unit coverage under `src/**` (ongoing).
 - Decide CI strategy for live passkey e2e (scheduled/manual vs per-PR).
+- Bootstrap npm trusted publishing and cut the first public npm release.
 
 ## Next
 
@@ -64,6 +65,7 @@ Latest validation on this machine (2026-03-06):
 
 ## Done (Recent)
 
+- Added tag-driven npm release automation with `release-it`, keeping version bumps out of committed source and documenting a manual bootstrap-tag path.
 - Declared Node.js 22 as the minimum supported runtime in `package.json` and switched CI `setup-node` to read the version from `package.json`.
 - Added Husky and lint-staged pre-commit hooks so staged JS/TS files are auto-fixed with Oxlint and formatted with Oxfmt before commit.
 - Adopted `oxfmt` and `oxlint`, added `pnpm run check`, and added CI coverage for format/lint/typecheck plus build and unit test.

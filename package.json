@@ -1,11 +1,15 @@
 {
   "name": "@openawa/cli",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.0.0-semantic-release",
+  "private": false,
   "bin": {
     "openawa": "dist/cli.js"
   },
   "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsup",
     "check": "npm-run-all --parallel typecheck lint format:check",
@@ -13,6 +17,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --deny-warnings .",
+    "release": "release-it",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit",
     "test:e2e": "pnpm run build && vitest run --project e2e",
@@ -27,6 +32,7 @@
     "viem": "^2.47.0"
   },
   "devDependencies": {
+    "@release-it/conventional-changelog": "^10.0.5",
     "@types/node": "^22.13.4",
     "execa": "^9.6.1",
     "husky": "^9.1.7",
@@ -36,6 +42,7 @@
     "oxfmt": "^0.36.0",
     "oxlint": "^1.51.0",
     "playwright": "^1.58.2",
+    "release-it": "^19.2.4",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
