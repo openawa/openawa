@@ -7,7 +7,7 @@
 Primary user promise:
 
 - Give an agent a wallet that can act autonomously with tight, inspectable policy boundaries.
-- Keep private key operations hardware-backed and non-exportable by default.
+- Keep private key operations hardware-backed and non-extractable by default.
 - Minimize footguns in non-interactive/automation contexts.
 
 Porto is currently the execution backend, but not the user-facing mental model.

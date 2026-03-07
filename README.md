@@ -4,19 +4,21 @@ openawa is a security-first wallet CLI for autonomous agents.
 
 Tagline: "Your agent's wallet. Your hardware. Your keys."
 
-It gives an agent a hardware-backed signing key plus onchain policy boundaries:
+It gives an agent a hardware-backed signing key with operator-controlled, onchain-enforced policy boundaries:
 
 - Keys are created on your device and are non-extractable by default.
 - A human admin grants constrained permissions for what the agent can do.
 - The smart account enforces those constraints on every execution.
 
+openawa gives agents bounded autonomy with operator-controlled signing and onchain-enforced permissions.
+
 openawa is powered by [Porto](https://porto.sh) for account and relay workflows, while key custody stays local.
 
-Core value:
+Core positioning:
 
-- Local key custody instead of cloud-held agent keys.
-- Onchain enforcement of spend limits, call scope, and expiry.
-- Open-source backend infrastructure instead of a closed hosted black box.
+- Local signing on operator-owned hardware instead of provider-managed signing.
+- Policy-bound autonomy with onchain enforcement of spend limits, call scope, and expiry.
+- Open, inspectable CLI workflow and open-source infrastructure instead of a closed hosted black box.
 
 ## Alpha Status
 
@@ -32,9 +34,10 @@ Current scope:
 
 Compared with cloud-key agent wallet products like [Coinbase Agentic Wallet](https://docs.cdp.coinbase.com/agentic-wallet/welcome), [Privy](https://www.privy.io/), [Turnkey](https://www.turnkey.com/), and [Sponge](https://paysponge.com/docs), openawa focuses on:
 
-- Hardware-bound key custody: private signing key stays on your machine.
-- Policy-bound autonomy: bounded permissions instead of unconstrained private key use.
-- Open, inspectable CLI workflow: explicit setup, explicit grants, explicit status.
+- Open agent wallet infrastructure: a wallet stack you can inspect and integrate into agent workflows without adopting a closed custody model.
+- Hardware-bound key custody: the private signing key stays on your machine and is non-extractable by default.
+- Policy-bound autonomy: bounded permissions instead of unconstrained private key use, enforced onchain by the smart account.
+- Explicit operator workflow: visible setup, visible grants, visible status, and no hidden background authority.
 
 This is a different trust model than hosted-key or hosted-TEE stacks: openawa keeps the signing primitive on operator-owned hardware and uses onchain permissions for runtime boundaries.
 
@@ -120,7 +123,7 @@ Why this mitigates malicious signing:
 What "non-extractable" means here:
 
 - The private key is not returned to user space as raw key bytes.
-- Under standard platform threat models, the private key is non-extractable (non-exportable) from Secure Enclave/TPM-backed storage, though a compromised host may still invoke signing while access is live.
+- Under standard platform threat models, the private key is non-extractable from Secure Enclave/TPM-backed storage, though a compromised host may still invoke signing while access is live.
 
 Residual risks:
 
