@@ -78,7 +78,7 @@ const DEFAULT_RELAY_RPC_URL = 'https://rpc.porto.sh'
 const ZERO_TX_HASH = '0x0000000000000000000000000000000000000000000000000000000000000000'
 // EXP is the interop fee token used on all porto testnets (same address across chains)
 const EXP_TOKEN = '0xfca413a634c4df6b98ebb970a44d9a32f8f5c64e'
-const EXP_CHAIN_IDS = new Set([Chains.baseSepolia.id, Chains.optimismSepolia.id])
+const EXP_CHAIN_IDS = new Set<number>([Chains.baseSepolia.id, Chains.optimismSepolia.id])
 const BASE_SEPOLIA_FAUCET_VALUE = '0x340aad21b3b700000'
 const RELAY_REQUEST_TIMEOUT_MS = 20_000
 const SEND_STAGE_TIMEOUT_MS = 90_000
